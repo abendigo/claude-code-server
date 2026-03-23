@@ -5,9 +5,12 @@ RUN apt-get update && apt-get install -y \
     git \
     curl \
     openssh-server \
-    ttyd \
     sudo \
     && rm -rf /var/lib/apt/lists/*
+
+# Install ttyd from GitHub releases
+RUN curl -L https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64 -o /usr/local/bin/ttyd && \
+    chmod +x /usr/local/bin/ttyd
 
 # Install Claude Code globally
 RUN npm install -g @anthropic-ai/claude-code
