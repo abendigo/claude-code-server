@@ -1,0 +1,33 @@
+services:
+  claude-code:
+    image: ghcr.io/abendigo/claude-code-server:latest
+    restart: unless-stopped
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      - workspace:/workspace
+      - ssh-key:/home/claude/.ssh:ro     # mount your authorized_keys here
+    ports:
+      - "2222:22"                         # SSH access via Tailscale IP
+    networks:
+      - traefik_proxy
+    labels:
+      - "traefik.enable=true"
+      # ttyd browser terminal
+      - "traefik.http.routers.claude-code.rule=Host(`claude.YOUR_TAILNET.ts.net`)"
+      - "traefik.http.routers.claude-code.entrypoints=websecure"
+      - "traefik.http.routers.claude-code.tls=true"
+      - "traefik.http.services.claude-code.loadbalancer.server.port=7681"
+
+volumes:
+  workspace:
+  ssh-key:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /path/to/your/authorized_keys/dir   # update this path on your host
+
+networks:
+  traefik_proxy:
+    external: true
