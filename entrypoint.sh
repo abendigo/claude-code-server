@@ -1,15 +1,6 @@
 #!/bin/bash
 set -e
 
-# Fix SSH key permissions if mounted volume
-if [ -f /home/claude/.ssh/authorized_keys ]; then
-    chmod 600 /home/claude/.ssh/authorized_keys
-    chown claude:claude /home/claude/.ssh/authorized_keys
-fi
-
-# Generate host SSH keys if not already present
-ssh-keygen -A
-
 # Start SSH daemon
 /usr/sbin/sshd
 
