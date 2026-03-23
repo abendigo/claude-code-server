@@ -17,14 +17,17 @@ RUN npm install -g @anthropic-ai/claude-code
 
 # Create non-root user
 RUN useradd -m -s /bin/bash claude && \
+    echo "claude:changeme" | chpasswd && \
     echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-# SSH hardening
-RUN mkdir /var/run/sshd && \
-    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
-    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config && \
-    sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config && \
-    echo "AllowUsers claude" >> /etc/ssh/sshd_config
+# SSH setup
+RUN mkdir /var/run/sshd
+
+# SSH hardening (disabled for now)
+# RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+#     sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config && \
+#     sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config && \
+#     echo "AllowUsers claude" >> /etc/ssh/sshd_config
 
 # Set up claude user's SSH dir (key mounted at runtime)
 RUN mkdir -p /home/claude/.ssh && \

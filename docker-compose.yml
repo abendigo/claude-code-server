@@ -6,18 +6,11 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - workspace:/workspace
-      - ssh-key:/home/claude/.ssh:ro     # mount your authorized_keys here
+      - ssh-key:/home/claude/.ssh:ro
     ports:
-      - "2222:22"                         # SSH access via Tailscale IP
+      - "7681:7681"
     networks:
-      - traefik_proxy
-    labels:
-      - "traefik.enable=true"
-      # ttyd browser terminal
-      - "traefik.http.routers.claude-code.rule=Host(`claude.YOUR_TAILNET.ts.net`)"
-      - "traefik.http.routers.claude-code.entrypoints=websecure"
-      - "traefik.http.routers.claude-code.tls=true"
-      - "traefik.http.services.claude-code.loadbalancer.server.port=7681"
+      - traefik_default
 
 volumes:
   workspace:
@@ -26,8 +19,8 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: /path/to/your/authorized_keys/dir   # update this path on your host
+      device: /home/marko/claude-code/ssh
 
 networks:
-  traefik_proxy:
+  traefik_default:
     external: true
