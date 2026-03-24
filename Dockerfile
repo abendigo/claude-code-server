@@ -16,13 +16,14 @@ RUN curl -L https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64
 # Install Claude Code globally
 RUN npm install -g @anthropic-ai/claude-code
 
-# Install custom ttyd index.html with banner
+# Build custom ttyd index.html: extract default HTML (with inlined JS/CSS) and patch in banner + logout
 ARG TTYD_HOST=claude.frustrated.blog
 ARG BUILD_VERSION=dev
 RUN mkdir -p /usr/local/share/ttyd
-COPY ttyd/index.html /usr/local/share/ttyd/index.html
-RUN sed -i "s/TTYD_HOST/${TTYD_HOST}/" /usr/local/share/ttyd/index.html && \
-    sed -i "s/BUILD_VERSION/${BUILD_VERSION}/" /usr/local/share/ttyd/index.html
+COPY ttyd/patch-index.sh /tmp/patch-index.sh
+RUN chmod +x /tmp/patch-index.sh && \
+    TTYD_HOST=${TTYD_HOST} BUILD_VERSION=${BUILD_VERSION} /tmp/patch-index.sh && \
+    rm /tmp/patch-index.sh
 
 # Create non-root user with /workspace as home
 RUN useradd -m -d /workspace -s /bin/bash claude && \
