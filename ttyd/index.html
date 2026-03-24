@@ -5,7 +5,7 @@
     <title>Claude Code</title>
     <style>
         body::before {
-            content: "Claude Code  ·  TTYD_HOST";
+            content: "Claude Code  ·  TTYD_HOST  ·  BUILD_VERSION";
             position: fixed;
             top: 0; left: 0; right: 0;
             z-index: 9999;
@@ -26,13 +26,23 @@
 
         #logout-btn {
             position: fixed;
-            top: 4px;
-            right: 16px;
+            top: 6px;
+            right: 12px;
             z-index: 10000;
             color: #6c7086;
             font-family: monospace;
-            font-size: 13px;
+            font-size: 12px;
             text-decoration: none;
+            border: 1px solid #313244;
+            padding: 2px 10px;
+            border-radius: 4px;
+            background: #1e1e2e;
+        }
+
+        #logout-btn:hover {
+            color: #cdd6f4;
+            border-color: #6c7086;
+            background: #313244;
         }
     </style>
 </head>

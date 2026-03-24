@@ -18,9 +18,11 @@ RUN npm install -g @anthropic-ai/claude-code
 
 # Install custom ttyd index.html with banner
 ARG TTYD_HOST=claude.frustrated.blog
+ARG BUILD_VERSION=dev
 RUN mkdir -p /usr/local/share/ttyd
 COPY ttyd/index.html /usr/local/share/ttyd/index.html
-RUN sed -i "s/TTYD_HOST/${TTYD_HOST}/" /usr/local/share/ttyd/index.html
+RUN sed -i "s/TTYD_HOST/${TTYD_HOST}/" /usr/local/share/ttyd/index.html && \
+    sed -i "s/BUILD_VERSION/${BUILD_VERSION}/" /usr/local/share/ttyd/index.html
 
 # Create non-root user with /workspace as home
 RUN useradd -m -d /workspace -s /bin/bash claude && \
