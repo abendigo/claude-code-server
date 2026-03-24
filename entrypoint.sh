@@ -12,8 +12,9 @@ if [ -f /home/claude/.ssh/authorized_keys ]; then
     chmod 700 /home/claude/.ssh_writable
     chmod 600 /home/claude/.ssh_writable/authorized_keys
     chown -R claude:claude /home/claude/.ssh_writable
-    # Point sshd to the writable copy
-    echo "AuthorizedKeysFile /home/claude/.ssh_writable/authorized_keys" >> /etc/ssh/sshd_config
+    # Point sshd to the writable copy (avoid duplicates on restart)
+    grep -q 'AuthorizedKeysFile /home/claude/.ssh_writable/authorized_keys' /etc/ssh/sshd_config || \
+        echo "AuthorizedKeysFile /home/claude/.ssh_writable/authorized_keys" >> /etc/ssh/sshd_config
 fi
 
 # Start SSH daemon
