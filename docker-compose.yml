@@ -6,10 +6,10 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - workspace:/workspace
-      - ssh-key:/home/claude/.ssh:ro
+      - ssh-dir:/home/claude/.ssh
+      - /home/marko/claude-code/ssh/authorized_keys:/tmp/authorized_keys:ro
     ports:
       - "2222:22"
-      - "7681:7681"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.claude-ttyd.rule=Host(`claude.frustrated.blog`)"
@@ -22,12 +22,7 @@ services:
 
 volumes:
   workspace:
-  ssh-key:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /home/marko/claude-code/ssh
+  ssh-dir:
 
 networks:
   traefik_default:

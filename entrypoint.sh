@@ -4,17 +4,12 @@ set -e
 # Generate host SSH keys if not already present
 ssh-keygen -A
 
-# Copy mounted SSH keys to a writable location (mount is read-only)
-if [ -f /home/claude/.ssh/authorized_keys ]; then
-    cp /home/claude/.ssh/authorized_keys /tmp/authorized_keys
-    mkdir -p /home/claude/.ssh_writable
-    mv /tmp/authorized_keys /home/claude/.ssh_writable/authorized_keys
-    chmod 700 /home/claude/.ssh_writable
-    chmod 600 /home/claude/.ssh_writable/authorized_keys
-    chown -R claude:claude /home/claude/.ssh_writable
-    # Point sshd to the writable copy (avoid duplicates on restart)
-    grep -q 'AuthorizedKeysFile /home/claude/.ssh_writable/authorized_keys' /etc/ssh/sshd_config || \
-        echo "AuthorizedKeysFile /home/claude/.ssh_writable/authorized_keys" >> /etc/ssh/sshd_config
+# Copy authorized_keys from read-only mount into persistent .ssh volume
+if [ -f /tmp/authorized_keys ]; then
+    cp /tmp/authorized_keys /home/claude/.ssh/authorized_keys
+    chmod 700 /home/claude/.ssh
+    chmod 600 /home/claude/.ssh/authorized_keys
+    chown -R claude:claude /home/claude/.ssh
 fi
 
 # Start SSH daemon
