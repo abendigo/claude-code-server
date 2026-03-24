@@ -17,7 +17,6 @@ RUN curl -L https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64
 RUN npm install -g @anthropic-ai/claude-code
 
 # Copy ttyd customization files
-COPY ttyd/banner.html /tmp/ttyd/banner.html
 COPY ttyd/banner.css /tmp/ttyd/banner.css
 
 # Build custom ttyd index.html with banner
@@ -29,12 +28,9 @@ RUN ttyd -p 7682 /bin/true & TTYD_PID=$! && \
       const fs = require('fs'); \
       let html = fs.readFileSync('/tmp/ttyd/default.html', 'utf8'); \
       if (!html.includes('<title>ttyd - Terminal</title>')) { console.error('ttyd HTML structure changed — update inject logic'); process.exit(1); } \
-      const banner = fs.readFileSync('/tmp/ttyd/banner.html', 'utf8').replace('claude.frustrated.blog', '${TTYD_HOST}'); \
-      const css = fs.readFileSync('/tmp/ttyd/banner.css', 'utf8'); \
-      const style = '<style>' + css + '</style>'; \
+      const css = fs.readFileSync('/tmp/ttyd/banner.css', 'utf8').replace('TTYD_HOST', '${TTYD_HOST}'); \
       html = html.replace('<title>ttyd - Terminal</title>', '<title>Claude Code</title>'); \
-      html = html.replace('</head>', style + '</head>'); \
-      html = html.replace('<body>', '<body>' + banner); \
+      html = html.replace('</head>', '<style>' + css + '</style></head>'); \
       fs.mkdirSync('/usr/local/share/ttyd', {recursive: true}); \
       fs.writeFileSync('/usr/local/share/ttyd/index.html', html); \
     " && \
