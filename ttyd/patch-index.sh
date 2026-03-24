@@ -1,24 +1,42 @@
 #!/bin/bash
-# Extract ttyd's built-in HTML (with inlined JS/CSS) and inject custom banner + logout button
+# Patch ttyd frontend source and build custom inline.html
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-OUTPUT="/usr/local/share/ttyd/index.html"
+TTYD_HTML="/tmp/ttyd-src/html"
 
-# Start ttyd briefly to grab its default HTML
-ttyd -p 9999 echo "extracting" &
-TTYD_PID=$!
-sleep 1
-curl -s http://localhost:9999 > "$OUTPUT"
-kill $TTYD_PID 2>/dev/null || true
-wait $TTYD_PID 2>/dev/null || true
+# Clone ttyd source
+git clone --depth 1 https://github.com/tsl0922/ttyd.git /tmp/ttyd-src
 
-# Read custom CSS and HTML from files, replace placeholders, collapse to one line
-CSS=$(cat "$SCRIPT_DIR/custom.css" | sed "s|TTYD_HOST|${TTYD_HOST}|g; s|BUILD_VERSION|${BUILD_VERSION}|g" | tr '\n' ' ')
-HTML=$(cat "$SCRIPT_DIR/custom.html" | sed "s|TTYD_HOST|${TTYD_HOST}|g; s|BUILD_VERSION|${BUILD_VERSION}|g" | tr '\n' ' ')
+# Patch index.tsx: append banner to body after app renders
+BANNER_HTML=$(cat "$SCRIPT_DIR/custom.html" | sed "s|TTYD_HOST|${TTYD_HOST}|g; s|BUILD_VERSION|${BUILD_VERSION}|g" | tr '\n' ' ' | sed "s|'|\\\\'|g")
+cat >> "$TTYD_HTML/src/index.tsx" <<TSEOF
 
-# Use awk for injection (avoids sed delimiter issues with URLs)
-awk -v css="$CSS" '{sub(/<\/head>/, "<style>" css "</style></head>")}1' "$OUTPUT" > "${OUTPUT}.tmp" && mv "${OUTPUT}.tmp" "$OUTPUT"
-awk -v html="$HTML" '{sub(/<\/body>/, html "</body>")}1' "$OUTPUT" > "${OUTPUT}.tmp" && mv "${OUTPUT}.tmp" "$OUTPUT"
+/* eslint-disable */
+// Inject custom banner
+const banner = document.createElement('div');
+banner.innerHTML = '${BANNER_HTML}';
+while (banner.firstChild) document.body.appendChild(banner.firstChild);
+TSEOF
 
-echo "Patched ttyd index.html at $OUTPUT"
+# Patch index.scss: append banner styles
+CUSTOM_CSS=$(cat "$SCRIPT_DIR/custom.css")
+cat >> "$TTYD_HTML/src/style/index.scss" <<SCSSEOF
+
+${CUSTOM_CSS}
+SCSSEOF
+
+# Build the frontend
+cd "$TTYD_HTML"
+corepack enable
+yarn install
+yarn run inline
+
+# Copy result
+mkdir -p /usr/local/share/ttyd
+cp "$TTYD_HTML/dist/inline.html" /usr/local/share/ttyd/index.html
+
+# Cleanup
+rm -rf /tmp/ttyd-src
+
+echo "Built custom ttyd inline.html at /usr/local/share/ttyd/index.html"

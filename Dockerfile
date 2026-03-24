@@ -1,3 +1,13 @@
+FROM node:24-slim AS ttyd-html
+
+# Build custom ttyd frontend with banner + logout button
+RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
+ARG TTYD_HOST=claude.frustrated.blog
+ARG BUILD_VERSION=dev
+COPY ttyd/ /tmp/ttyd/
+RUN chmod +x /tmp/ttyd/patch-index.sh && \
+    TTYD_HOST=${TTYD_HOST} BUILD_VERSION=${BUILD_VERSION} /tmp/ttyd/patch-index.sh
+
 FROM node:24-slim
 
 # Install system dependencies
@@ -16,14 +26,8 @@ RUN curl -L https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64
 # Install Claude Code globally
 RUN npm install -g @anthropic-ai/claude-code
 
-# Build custom ttyd index.html: extract default HTML (with inlined JS/CSS) and patch in banner + logout
-ARG TTYD_HOST=claude.frustrated.blog
-ARG BUILD_VERSION=dev
-RUN mkdir -p /usr/local/share/ttyd
-COPY ttyd/ /tmp/ttyd/
-RUN chmod +x /tmp/ttyd/patch-index.sh && \
-    TTYD_HOST=${TTYD_HOST} BUILD_VERSION=${BUILD_VERSION} /tmp/ttyd/patch-index.sh && \
-    rm -rf /tmp/ttyd
+# Copy custom ttyd frontend from build stage
+COPY --from=ttyd-html /usr/local/share/ttyd/index.html /usr/local/share/ttyd/index.html
 
 # Create non-root user with /workspace as home
 RUN useradd -m -d /workspace -s /bin/bash claude && \
