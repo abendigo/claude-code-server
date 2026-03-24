@@ -21,7 +21,7 @@ fi
 /usr/sbin/sshd
 
 # Start ttyd as the claude user on port 7681
-ttyd -p 7681 sudo -u claude -i &
+gosu claude ttyd -p 7681 /bin/bash -l &
 
 echo "Claude Code server started."
 echo "  SSH:  port 22"
