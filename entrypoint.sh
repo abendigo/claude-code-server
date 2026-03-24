@@ -20,7 +20,7 @@ chown -R claude:claude /workspace/.ssh
 /usr/sbin/sshd
 
 # Start ttyd as the claude user on port 7681
-gosu claude ttyd -W -w /workspace -p 7681 /bin/bash -l &
+gosu claude ttyd -W -w /workspace -p 7681 -I /usr/local/share/ttyd/index.html /bin/bash -l &
 
 echo "Claude Code server started."
 echo "  SSH:  port 22"
