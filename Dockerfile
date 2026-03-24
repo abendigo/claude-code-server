@@ -20,10 +20,10 @@ RUN npm install -g @anthropic-ai/claude-code
 ARG TTYD_HOST=claude.frustrated.blog
 ARG BUILD_VERSION=dev
 RUN mkdir -p /usr/local/share/ttyd
-COPY ttyd/patch-index.sh /tmp/patch-index.sh
-RUN chmod +x /tmp/patch-index.sh && \
-    TTYD_HOST=${TTYD_HOST} BUILD_VERSION=${BUILD_VERSION} /tmp/patch-index.sh && \
-    rm /tmp/patch-index.sh
+COPY ttyd/ /tmp/ttyd/
+RUN chmod +x /tmp/ttyd/patch-index.sh && \
+    TTYD_HOST=${TTYD_HOST} BUILD_VERSION=${BUILD_VERSION} /tmp/ttyd/patch-index.sh && \
+    rm -rf /tmp/ttyd
 
 # Create non-root user with /workspace as home
 RUN useradd -m -d /workspace -s /bin/bash claude && \

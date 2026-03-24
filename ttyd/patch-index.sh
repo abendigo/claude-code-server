@@ -2,6 +2,7 @@
 # Extract ttyd's built-in HTML (with inlined JS/CSS) and inject custom banner + logout button
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUTPUT="/usr/local/share/ttyd/index.html"
 
 # Start ttyd briefly to grab its default HTML
@@ -12,15 +13,12 @@ curl -s http://localhost:9999 > "$OUTPUT"
 kill $TTYD_PID 2>/dev/null || true
 wait $TTYD_PID 2>/dev/null || true
 
-# Inject custom CSS before </head>
-sed -i "s|</head>|<style>\
-body::before{content:\"Claude Code · ${TTYD_HOST} · ${BUILD_VERSION}\";position:fixed;top:0;left:0;right:0;z-index:9999;height:32px;line-height:32px;background:#181825;border-bottom:1px solid #313244;padding:0 16px;font-family:monospace;font-size:13px;color:#6c7086;box-sizing:border-box}\
-body{margin-top:32px!important}\
-#logout-btn{position:fixed;top:6px;right:12px;z-index:10000;color:#6c7086;font-family:monospace;font-size:12px;text-decoration:none;border:1px solid #313244;padding:2px 10px;border-radius:4px;background:#1e1e2e}\
-#logout-btn:hover{color:#cdd6f4;border-color:#6c7086;background:#313244}\
-</style></head>|" "$OUTPUT"
+# Read custom CSS and HTML from files, replace placeholders, collapse to one line
+CSS=$(cat "$SCRIPT_DIR/custom.css" | sed "s|TTYD_HOST|${TTYD_HOST}|g; s|BUILD_VERSION|${BUILD_VERSION}|g" | tr '\n' ' ')
+HTML=$(cat "$SCRIPT_DIR/custom.html" | sed "s|TTYD_HOST|${TTYD_HOST}|g; s|BUILD_VERSION|${BUILD_VERSION}|g" | tr '\n' ' ')
 
-# Inject logout button after <body>
-sed -i 's|<body>|<body><a id="logout-btn" href="https://auth.frustrated.blog/logout">logout</a>|' "$OUTPUT"
+# Use awk for injection (avoids sed delimiter issues with URLs)
+awk -v css="$CSS" '{sub(/<\/head>/, "<style>" css "</style></head>")}1' "$OUTPUT" > "${OUTPUT}.tmp" && mv "${OUTPUT}.tmp" "$OUTPUT"
+awk -v html="$HTML" '{sub(/<\/body>/, html "</body>")}1' "$OUTPUT" > "${OUTPUT}.tmp" && mv "${OUTPUT}.tmp" "$OUTPUT"
 
 echo "Patched ttyd index.html at $OUTPUT"
