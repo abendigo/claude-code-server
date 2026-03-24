@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Claude Code</title>
+    <style>
+        body::before {
+            content: "Claude Code  ·  TTYD_HOST";
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            z-index: 9999;
+            height: 32px;
+            line-height: 32px;
+            background: #181825;
+            border-bottom: 1px solid #313244;
+            padding: 0 16px;
+            font-family: monospace;
+            font-size: 13px;
+            color: #6c7086;
+            box-sizing: border-box;
+        }
+
+        body {
+            margin-top: 32px !important;
+        }
+
+        #logout-btn {
+            position: fixed;
+            top: 4px;
+            right: 16px;
+            z-index: 10000;
+            color: #6c7086;
+            font-family: monospace;
+            font-size: 13px;
+            text-decoration: none;
+        }
+    </style>
+</head>
+<body>
+    <a id="logout-btn" href="https://auth.frustrated.blog/logout">logout</a>
+    <div id="terminal"></div>
+</body>
+</html>
