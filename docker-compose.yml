@@ -4,12 +4,20 @@ services:
     restart: unless-stopped
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - TTYD_USERNAME=${TTYD_USERNAME:-claude}
+      - TTYD_PASSWORD=${TTYD_PASSWORD:?TTYD_PASSWORD must be set}
     volumes:
       - workspace:/workspace
       - ssh-key:/home/claude/.ssh:ro
     ports:
       - "2222:22"
       - "7681:7681"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.claude-ttyd.rule=Host(`claude.frustrated.blog`)"
+      - "traefik.http.routers.claude-ttyd.entrypoints=websecure"
+      - "traefik.http.routers.claude-ttyd.tls.certresolver=leresolver"
+      - "traefik.http.services.claude-ttyd.loadbalancer.server.port=7681"
     networks:
       - traefik_default
 
