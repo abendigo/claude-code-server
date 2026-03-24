@@ -8,6 +8,7 @@ services:
       - workspace:/workspace
       - ssh-key:/home/claude/.ssh:ro
     ports:
+      - "2222:22"
       - "7681:7681"
     networks:
       - traefik_default
