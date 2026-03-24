@@ -6,7 +6,6 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
     volumes:
       - workspace:/workspace
-      - ssh-dir:/home/claude/.ssh
       - /home/marko/claude-code/ssh/authorized_keys:/tmp/authorized_keys:ro
     ports:
       - "2222:22"
@@ -22,7 +21,6 @@ services:
 
 volumes:
   workspace:
-  ssh-dir:
 
 networks:
   traefik_default:

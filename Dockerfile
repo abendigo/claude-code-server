@@ -16,8 +16,8 @@ RUN curl -L https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64
 # Install Claude Code globally
 RUN npm install -g @anthropic-ai/claude-code
 
-# Create non-root user
-RUN useradd -m -s /bin/bash claude && \
+# Create non-root user with /workspace as home
+RUN useradd -m -d /workspace -s /bin/bash claude && \
     passwd -l claude && \
     echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
@@ -28,14 +28,6 @@ RUN mkdir /var/run/sshd
 RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
     sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config && \
     echo "AllowUsers claude" >> /etc/ssh/sshd_config
-
-# Set up claude user's SSH dir (key mounted at runtime)
-RUN mkdir -p /home/claude/.ssh && \
-    chmod 700 /home/claude/.ssh && \
-    chown claude:claude /home/claude/.ssh
-
-# Workspace for repos
-RUN mkdir -p /workspace && chown claude:claude /workspace
 
 # Copy entrypoint
 COPY entrypoint.sh /entrypoint.sh

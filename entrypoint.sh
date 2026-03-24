@@ -4,19 +4,23 @@ set -e
 # Generate host SSH keys if not already present
 ssh-keygen -A
 
-# Copy authorized_keys from read-only mount into persistent .ssh volume
+# Ensure .ssh directory exists in persistent home volume
+mkdir -p /workspace/.ssh
+
+# Copy authorized_keys from read-only mount into persistent .ssh
 if [ -f /tmp/authorized_keys ]; then
-    cp /tmp/authorized_keys /home/claude/.ssh/authorized_keys
-    chmod 700 /home/claude/.ssh
-    chmod 600 /home/claude/.ssh/authorized_keys
-    chown -R claude:claude /home/claude/.ssh
+    cp /tmp/authorized_keys /workspace/.ssh/authorized_keys
+    chmod 600 /workspace/.ssh/authorized_keys
 fi
+
+chmod 700 /workspace/.ssh
+chown -R claude:claude /workspace/.ssh
 
 # Start SSH daemon
 /usr/sbin/sshd
 
 # Start ttyd as the claude user on port 7681
-gosu claude ttyd -W -p 7681 /bin/bash -l &
+gosu claude ttyd -W -w /workspace -p 7681 /bin/bash -l &
 
 echo "Claude Code server started."
 echo "  SSH:  port 22"
