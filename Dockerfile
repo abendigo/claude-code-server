@@ -17,6 +17,7 @@ RUN apt-get update && apt-get install -y \
     openssh-server \
     sudo \
     gosu \
+    tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # Install ttyd from GitHub releases
