@@ -1,0 +1,38 @@
+#!/bin/bash
+# Watch the latest GitHub Actions run for the current branch and report result.
+# Usage: watch-gh-build [repo]  (defaults to current git remote)
+
+set -euo pipefail
+
+REPO="${1:-}"
+if [ -z "$REPO" ]; then
+  REPO=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) || {
+    echo "watch-gh-build: could not determine repo. Pass owner/repo as argument." >&2
+    exit 1
+  }
+fi
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+
+# Wait briefly for the run to appear if it was just triggered
+sleep 3
+
+RUN_ID=$(gh run list --repo "$REPO" --branch "$BRANCH" --limit 1 --json databaseId -q '.[0].databaseId' 2>/dev/null)
+
+if [ -z "$RUN_ID" ]; then
+  echo "watch-gh-build: no runs found for branch '$BRANCH' on $REPO" >&2
+  exit 1
+fi
+
+echo "Watching run $RUN_ID on $REPO ($BRANCH)..."
+gh run watch "$RUN_ID" --repo "$REPO" --exit-status
+STATUS=$?
+
+if [ $STATUS -eq 0 ]; then
+  echo "Build passed."
+else
+  echo "Build FAILED."
+  gh run view "$RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -50 || true
+fi
+
+exit $STATUS

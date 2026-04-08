@@ -30,6 +30,10 @@ RUN curl -L https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64
 # Install Claude Code globally
 RUN npm install -g @anthropic-ai/claude-code
 
+# Install watch-gh-build helper script
+COPY scripts/watch-gh-build /usr/local/bin/watch-gh-build
+RUN chmod +x /usr/local/bin/watch-gh-build
+
 # Copy custom ttyd frontend from build stage
 COPY --from=ttyd-html /usr/local/share/ttyd/index.html /usr/local/share/ttyd/index.html
 
