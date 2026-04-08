@@ -7,6 +7,7 @@ services:
     volumes:
       - workspace:/workspace
       - /home/marko/claude-code/ssh/authorized_keys:/tmp/authorized_keys:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     ports:
       - "2222:22"
     labels:
