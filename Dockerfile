@@ -21,6 +21,9 @@ RUN apt-get update && apt-get install -y \
     docker.io \
     gh \
     sqlite3 \
+    dnsutils \
+    whois \
+    jq \
     && rm -rf /var/lib/apt/lists/*
 
 # Install ttyd from GitHub releases
