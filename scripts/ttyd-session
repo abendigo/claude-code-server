@@ -1,0 +1,53 @@
+#!/bin/bash
+# Entry point ttyd runs for each new browser connection. ttyd spawns one
+# instance of this per client by default, so each browser tab/device gets
+# its own independent tmux session unless you explicitly choose to attach
+# to (mirror) an existing one.
+
+set -uo pipefail
+
+mapfile -t SESSIONS < <(tmux list-sessions -F '#S' 2>/dev/null)
+
+next_session_name() {
+  local n=1
+  while tmux has-session -t "session-$n" 2>/dev/null; do
+    n=$((n + 1))
+  done
+  echo "session-$n"
+}
+
+new_session() {
+  local default_name name
+  default_name="$(next_session_name)"
+  read -rp "Name for new session [$default_name]: " name
+  name="${name:-$default_name}"
+  if tmux has-session -t "$name" 2>/dev/null; then
+    echo "Session '$name' already exists, using '$default_name' instead."
+    name="$default_name"
+  fi
+  exec tmux new -s "$name"
+}
+
+# No existing sessions: nothing to attach to, just start one.
+if [ ${#SESSIONS[@]} -eq 0 ]; then
+  new_session
+fi
+
+echo "Existing sessions:"
+for i in "${!SESSIONS[@]}"; do
+  printf '  %d) %s (attach - mirrors that session live)\n' "$((i + 1))" "${SESSIONS[$i]}"
+done
+echo "  n) new independent session"
+read -rp "Choose [n]: " choice
+
+if [ -z "$choice" ] || [ "$choice" = "n" ]; then
+  new_session
+fi
+
+index=$((choice - 1))
+if [ "$index" -ge 0 ] && [ "$index" -lt "${#SESSIONS[@]}" ]; then
+  exec tmux attach -t "${SESSIONS[$index]}"
+fi
+
+echo "Invalid choice, starting a new session."
+new_session

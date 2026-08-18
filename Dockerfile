@@ -37,6 +37,19 @@ RUN npm install -g @anthropic-ai/claude-code
 COPY scripts/watch-gh-build /usr/local/bin/watch-gh-build
 RUN chmod +x /usr/local/bin/watch-gh-build
 
+# Install the VS Code CLI, used to run "code tunnel" for VS Code Remote
+# Tunnels (browser or desktop VS Code access without any inbound port).
+RUN curl -fL 'https://update.code.visualstudio.com/latest/cli-linux-x64/stable' --output /tmp/vscode_cli.tar.gz && \
+    tar -xf /tmp/vscode_cli.tar.gz -C /usr/local/bin && \
+    chmod +x /usr/local/bin/code && \
+    rm /tmp/vscode_cli.tar.gz
+
+# Install ttyd session picker: run per-connection so each browser tab/device
+# gets an independent tmux session by default, with the option to attach to
+# (mirror) an existing one.
+COPY scripts/ttyd-session /usr/local/bin/ttyd-session
+RUN chmod +x /usr/local/bin/ttyd-session
+
 # Copy custom ttyd frontend from build stage
 COPY --from=ttyd-html /usr/local/share/ttyd/index.html /usr/local/share/ttyd/index.html
 
