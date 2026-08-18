@@ -1,0 +1,21 @@
+#!/bin/bash
+# Entry point ttyd runs for each new browser connection on the gateway.
+# ttyd is started with `-H Remote-User`, which makes it read the
+# Authelia-authenticated username Traefik forwards and expose it to this
+# script as $TTYD_USER (see ttyd's --auth-header option). Port 7681 is only
+# reachable through Traefik+Authelia -- it is never published directly --
+# so this header can be trusted.
+set -uo pipefail
+
+RAW_USER="${TTYD_USER:-}"
+
+# Fail closed: only a lowercase, POSIX-ish username gets a container. LDAP
+# usernames are already this shape in practice; anything else is refused
+# rather than guessed at.
+if [ -z "$RAW_USER" ] || ! [[ "$RAW_USER" =~ ^[a-z][a-z0-9_.-]{0,31}$ ]]; then
+    echo "Access denied: no valid authenticated user."
+    sleep 2
+    exit 1
+fi
+
+exec /usr/local/bin/dispatch-to-worker "$RAW_USER"

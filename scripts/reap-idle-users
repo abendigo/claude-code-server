@@ -1,0 +1,31 @@
+#!/bin/bash
+# Background loop on the gateway: stop (never remove) worker containers
+# that haven't been dispatched to in IDLE_TIMEOUT_SECONDS. Their volume and
+# container definition persist, so the next login just `docker start`s them
+# again -- this is purely about not leaving idle containers running.
+set -u
+
+STATE_DIR="/var/lib/claude-code-dispatch"
+TIMEOUT="${IDLE_TIMEOUT_SECONDS:-7200}"   # default 2h
+INTERVAL="${REAP_INTERVAL_SECONDS:-300}"  # check every 5m
+
+mkdir -p "$STATE_DIR"
+
+while true; do
+    sleep "$INTERVAL"
+    now=$(date +%s)
+    for f in "$STATE_DIR"/*.lastseen; do
+        [ -e "$f" ] || continue
+        name=$(basename "$f" .lastseen)
+        last=$(cat "$f" 2>/dev/null || echo 0)
+        age=$(( now - last ))
+        if [ "$age" -ge "$TIMEOUT" ]; then
+            container="claude-code-user-${name}"
+            running=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null || echo false)
+            if [ "$running" = "true" ]; then
+                echo "reap-idle-users: '${name}' idle ${age}s -- stopping ${container}"
+                docker stop -t 30 "$container" >/dev/null 2>&1 || true
+            fi
+        fi
+    done
+done

@@ -7,7 +7,6 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 jobs:
   build-and-push:
@@ -15,6 +14,15 @@ jobs:
     permissions:
       contents: read
       packages: write
+    strategy:
+      matrix:
+        include:
+          - name: gateway
+            dockerfile: Dockerfile.gateway
+            image: ${{ github.repository }}
+          - name: worker
+            dockerfile: Dockerfile.worker
+            image: ${{ github.repository }}-worker
 
     steps:
       - name: Checkout repository
@@ -31,7 +39,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ matrix.image }}
           tags: |
             type=raw,value=latest
             type=sha,prefix=sha-
@@ -43,15 +51,16 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: BUILD_VERSION=${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
       - name: Notify Portainer
-        if: env.PORTAINER_WEBHOOK_URL != ''
+        if: matrix.name == 'gateway' && env.PORTAINER_WEBHOOK_URL != ''
         env:
           PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
         run: curl -s -o /dev/null -w "%{http_code}" -X POST "$PORTAINER_WEBHOOK_URL"
