@@ -4,9 +4,10 @@ FROM node:24-slim AS ttyd-html
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 ARG TTYD_HOST=claude.frustrated.blog
 ARG BUILD_VERSION=dev
+ARG TUNNEL_NAME=claude-code-server
 COPY ttyd/ /tmp/ttyd/
 RUN chmod +x /tmp/ttyd/patch-index.sh && \
-    TTYD_HOST=${TTYD_HOST} BUILD_VERSION=${BUILD_VERSION} /tmp/ttyd/patch-index.sh
+    TTYD_HOST=${TTYD_HOST} BUILD_VERSION=${BUILD_VERSION} TUNNEL_NAME=${TUNNEL_NAME} /tmp/ttyd/patch-index.sh
 
 FROM node:24-slim
 

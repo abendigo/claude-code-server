@@ -9,7 +9,8 @@ TTYD_HTML="/tmp/ttyd-src/html"
 git clone --depth 1 https://github.com/tsl0922/ttyd.git /tmp/ttyd-src
 
 # Patch index.tsx: append banner to body after app renders
-BANNER_HTML=$(cat "$SCRIPT_DIR/custom.html" | sed "s|TTYD_HOST|${TTYD_HOST}|g; s|BUILD_VERSION|${BUILD_VERSION}|g" | tr '\n' ' ' | sed "s|'|\\\\'|g")
+SHORT_VERSION="${BUILD_VERSION:0:7}"
+BANNER_HTML=$(cat "$SCRIPT_DIR/custom.html" | sed "s|TTYD_HOST|${TTYD_HOST}|g; s|BUILD_VERSION|${SHORT_VERSION}|g; s|TUNNEL_NAME|${TUNNEL_NAME}|g" | tr '\n' ' ' | sed "s|'|\\\\'|g")
 cat >> "$TTYD_HTML/src/index.tsx" <<TSEOF
 
 /* eslint-disable */
