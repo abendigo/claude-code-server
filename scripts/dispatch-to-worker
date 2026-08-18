@@ -1,0 +1,48 @@
+#!/bin/bash
+# Get-or-create the worker container for a given username, then exec into
+# it. Shared by ttyd-dispatch today; a future ssh-dispatch can reuse it too.
+#
+# Runs as root on the gateway (needs the mounted docker.sock). The caller is
+# responsible for validating $1 against a strict charset first -- this
+# script trusts its argument enough to use it in container/volume names and
+# docker exec.
+set -euo pipefail
+
+NAME="$1"
+CONTAINER="claude-code-user-${NAME}"
+VOLUME="workspace-${NAME}"
+IMAGE="${WORKER_IMAGE:-ghcr.io/abendigo/claude-code-server-worker:latest}"
+STATE_DIR="/var/lib/claude-code-dispatch"
+
+mkdir -p "$STATE_DIR"
+
+if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
+    echo "No environment yet for '${NAME}' -- creating one (this can take a minute on first login)..."
+    docker run -d \
+        --name "$CONTAINER" \
+        --label claude-code.managed=true \
+        --label "claude-code.user=${NAME}" \
+        --privileged \
+        --stop-timeout 20 \
+        -e ANTHROPIC_API_KEY \
+        -e TUNNEL_NAME="${TUNNEL_NAME:-claude-code-server}-${NAME}" \
+        -v "${VOLUME}:/workspace" \
+        "$IMAGE" >/dev/null
+elif [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" != "true" ]; then
+    echo "Resuming environment for '${NAME}'..."
+    docker start "$CONTAINER" >/dev/null
+fi
+
+# Record activity for the idle reaper, regardless of whether this was a
+# fresh create, a resume, or just another connection to an already-running
+# container.
+date +%s > "${STATE_DIR}/${NAME}.lastseen"
+
+# Wait for the worker's own entrypoint to have installed ttyd-session before
+# handing the terminal in -- matters mainly right after a fresh create.
+for _ in $(seq 1 30); do
+    docker exec "$CONTAINER" test -x /usr/local/bin/ttyd-session 2>/dev/null && break
+    sleep 1
+done
+
+exec docker exec -it -e "TTYD_USER=${NAME}" "$CONTAINER" /usr/local/bin/ttyd-session

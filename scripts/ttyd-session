@@ -6,6 +6,10 @@
 
 set -uo pipefail
 
+if [ -n "${TUNNEL_NAME:-}" ]; then
+  echo "VS Code tunnel: https://vscode.dev/tunnel/${TUNNEL_NAME}"
+fi
+
 mapfile -t SESSIONS < <(tmux list-sessions -F '#S' 2>/dev/null)
 
 next_session_name() {

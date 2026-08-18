@@ -4,12 +4,12 @@ services:
     restart: unless-stopped
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - WORKER_IMAGE=ghcr.io/abendigo/claude-code-server-worker:latest
+      - TUNNEL_NAME=claude-code-server
+      - IDLE_TIMEOUT_SECONDS=7200
     volumes:
-      - workspace:/workspace
-      - /home/marko/claude-code/ssh/authorized_keys:/tmp/authorized_keys:ro
+      - dispatch-state:/var/lib/claude-code-dispatch
       - /var/run/docker.sock:/var/run/docker.sock
-    ports:
-      - "2222:22"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.claude-ttyd.rule=Host(`claude.frustrated.blog`)"
@@ -21,7 +21,7 @@ services:
       - traefik_default
 
 volumes:
-  workspace:
+  dispatch-state:
 
 networks:
   traefik_default:
