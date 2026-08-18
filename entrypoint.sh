@@ -33,8 +33,8 @@ gosu claude ttyd -W -w /workspace -p 7681 -I /usr/local/share/ttyd/index.html /u
 gosu claude env HOME=/workspace code tunnel --accept-server-license-terms --name "${TUNNEL_NAME:-claude-code-server}" &
 
 echo "Claude Code server started."
-echo "  SSH:          port 22"
-echo "  ttyd:         port 7681"
+echo "  SSH: port 22"
+echo "  ttyd: port 7681"
 echo "  VS Code tunnel: name '${TUNNEL_NAME:-claude-code-server}' (see logs for first-time login)"
 
 # Keep container alive
