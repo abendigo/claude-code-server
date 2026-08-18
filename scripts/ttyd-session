@@ -16,9 +16,21 @@ next_session_name() {
   echo "session-$n"
 }
 
-# No existing sessions: nothing to offer, just start one.
+new_session() {
+  local default_name name
+  default_name="$(next_session_name)"
+  read -rp "Name for new session [$default_name]: " name
+  name="${name:-$default_name}"
+  if tmux has-session -t "$name" 2>/dev/null; then
+    echo "Session '$name' already exists, using '$default_name' instead."
+    name="$default_name"
+  fi
+  exec tmux new -s "$name"
+}
+
+# No existing sessions: nothing to attach to, just start one.
 if [ ${#SESSIONS[@]} -eq 0 ]; then
-  exec tmux new -s "$(next_session_name)"
+  new_session
 fi
 
 echo "Existing sessions:"
@@ -29,7 +41,7 @@ echo "  n) new independent session"
 read -rp "Choose [n]: " choice
 
 if [ -z "$choice" ] || [ "$choice" = "n" ]; then
-  exec tmux new -s "$(next_session_name)"
+  new_session
 fi
 
 index=$((choice - 1))
@@ -38,4 +50,4 @@ if [ "$index" -ge 0 ] && [ "$index" -lt "${#SESSIONS[@]}" ]; then
 fi
 
 echo "Invalid choice, starting a new session."
-exec tmux new -s "$(next_session_name)"
+new_session
