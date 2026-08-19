@@ -1,30 +1,60 @@
 #!/bin/bash
-# Background loop on the gateway: stop (never remove) worker containers
-# that haven't been dispatched to in IDLE_TIMEOUT_SECONDS. Their volume and
-# container definition persist, so the next login just `docker start`s them
-# again -- this is purely about not leaving idle containers running.
+# Background loop on the gateway: stop worker containers that haven't been
+# dispatched to in IDLE_TIMEOUT_SECONDS, and additionally remove (not just
+# stop) any that are idle *and* running a stale image, so the next login
+# rebuilds them fresh from whatever was last pushed instead of resuming the
+# same old image forever -- dispatch-to-worker only ever `docker start`s an
+# existing container, it never checks for a newer image itself.
+#
+# The `docker stop` still happens first and is graceful, giving
+# entrypoint-worker.sh's SIGTERM trap a chance to flush the VS Code tunnel
+# cleanly before anything is torn down (see vscode_tunnel_graceful_shutdown_fix
+# in project memory for why that trap exists -- a SIGKILL there forces a
+# fresh device-code login). This never touches a container that isn't
+# already idle, so it can't interrupt an active session. The user's
+# /workspace volume (and with it .vscode/cli/token.json) is untouched by a
+# removal since it's a separate named volume, not part of the container.
 set -u
 
 STATE_DIR="/var/lib/claude-code-dispatch"
 TIMEOUT="${IDLE_TIMEOUT_SECONDS:-7200}"   # default 2h
 INTERVAL="${REAP_INTERVAL_SECONDS:-300}"  # check every 5m
+WORKER_IMAGE="${WORKER_IMAGE:-ghcr.io/abendigo/claude-code-server-worker:latest}"
 
 mkdir -p "$STATE_DIR"
 
 while true; do
     sleep "$INTERVAL"
+
+    # Refresh the local image cache once per cycle so the staleness check
+    # below means something. Best-effort: if the pull fails (registry
+    # unreachable, etc.) nothing looks stale this cycle and containers are
+    # just left running/stopped as before.
+    docker pull "$WORKER_IMAGE" >/dev/null 2>&1 || true
+    latest_id=$(docker image inspect -f '{{.Id}}' "$WORKER_IMAGE" 2>/dev/null || echo "")
+
     now=$(date +%s)
     for f in "$STATE_DIR"/*.lastseen; do
         [ -e "$f" ] || continue
         name=$(basename "$f" .lastseen)
         last=$(cat "$f" 2>/dev/null || echo 0)
         age=$(( now - last ))
-        if [ "$age" -ge "$TIMEOUT" ]; then
-            container="claude-code-user-${name}"
-            running=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null || echo false)
-            if [ "$running" = "true" ]; then
-                echo "reap-idle-users: '${name}' idle ${age}s -- stopping ${container}"
-                docker stop -t 30 "$container" >/dev/null 2>&1 || true
+        [ "$age" -ge "$TIMEOUT" ] || continue
+
+        container="claude-code-user-${name}"
+        docker inspect "$container" >/dev/null 2>&1 || continue
+
+        running=$(docker inspect -f '{{.State.Running}}' "$container" 2>/dev/null || echo false)
+        if [ "$running" = "true" ]; then
+            echo "reap-idle-users: '${name}' idle ${age}s -- stopping ${container}"
+            docker stop -t 30 "$container" >/dev/null 2>&1 || true
+        fi
+
+        if [ -n "$latest_id" ]; then
+            current_id=$(docker inspect -f '{{.Image}}' "$container" 2>/dev/null || echo "")
+            if [ -n "$current_id" ] && [ "$current_id" != "$latest_id" ]; then
+                echo "reap-idle-users: '${name}' idle ${age}s and running a stale image -- removing ${container} (recreated fresh on next login)"
+                docker rm "$container" >/dev/null 2>&1 || true
             fi
         fi
     done
