@@ -40,8 +40,11 @@ RUN curl -fL 'https://update.code.visualstudio.com/latest/cli-linux-x64/stable' 
 COPY scripts/ttyd-session /usr/local/bin/ttyd-session
 RUN chmod +x /usr/local/bin/ttyd-session
 
-# Create non-root user with /workspace as home
-RUN useradd -m -d /workspace -s /bin/bash claude && \
+# Create non-root user with /workspace as home. Also added to the `docker`
+# group so the inner dockerd's socket (group-owned by `docker`) is usable
+# without needing sudo for every docker command -- NOPASSWD sudo is still
+# there as a fallback for anything else that needs root.
+RUN useradd -m -d /workspace -s /bin/bash -G docker claude && \
     passwd -l claude && \
     echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 

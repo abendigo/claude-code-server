@@ -45,4 +45,4 @@ for _ in $(seq 1 30); do
     sleep 1
 done
 
-exec docker exec -it -e "TTYD_USER=${NAME}" "$CONTAINER" /usr/local/bin/ttyd-session
+exec docker exec -it -u claude -e "TTYD_USER=${NAME}" -e HOME=/workspace "$CONTAINER" /usr/local/bin/ttyd-session
