@@ -6,8 +6,16 @@
 
 set -uo pipefail
 
+# A plain `echo` here gets wiped the instant tmux starts below: tmux
+# switches to its own alternate screen buffer, which replaces (not
+# scrolls past) whatever was on the terminal a moment ago. Set it as a
+# tmux status-bar option instead so it stays visible for the life of the
+# session -- this also starts the tmux server as a side effect if it
+# isn't already running, so the option is in place before `new`/`attach`
+# below connects to it.
 if [ -n "${TUNNEL_NAME:-}" ]; then
-  echo "VS Code tunnel: https://vscode.dev/tunnel/${TUNNEL_NAME}"
+  tmux set-option -g status-right "VS Code: https://vscode.dev/tunnel/${TUNNEL_NAME}" 2>/dev/null
+  tmux set-option -g status-right-length 100 2>/dev/null
 fi
 
 mapfile -t SESSIONS < <(tmux list-sessions -F '#S' 2>/dev/null)
@@ -29,7 +37,13 @@ new_session() {
     echo "Session '$name' already exists, using '$default_name' instead."
     name="$default_name"
   fi
-  exec tmux new -s "$name"
+  # Print the MOTD (written by the worker's entrypoint) as the pane's first
+  # command rather than echoing it here directly -- anything printed before
+  # this point is wiped the instant tmux switches to its alternate screen
+  # buffer, same as the status-right trick above. Running it as the pane's
+  # command means it prints after tmux has already taken over, so it stays
+  # in the scrollback for the life of the session.
+  exec tmux new -s "$name" "cat /etc/motd 2>/dev/null; exec bash"
 }
 
 # No existing sessions: nothing to attach to, just start one.

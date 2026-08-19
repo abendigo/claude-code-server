@@ -43,6 +43,13 @@ shutdown() {
 }
 trap shutdown TERM INT
 
+# Written once here, where TUNNEL_NAME is known, and printed by ttyd-session
+# at the start of each new tmux session -- see the comment there for why it
+# can't just be `echo`ed directly into the terminal.
+cat > /etc/motd <<EOF
+VS Code tunnel: https://vscode.dev/tunnel/${TUNNEL_NAME:-claude-code-server}
+EOF
+
 echo "Worker environment started."
 echo "  VS Code tunnel: name '${TUNNEL_NAME:-claude-code-server}' (see logs for first-time login)"
 echo "  Docker-in-Docker: ready"
