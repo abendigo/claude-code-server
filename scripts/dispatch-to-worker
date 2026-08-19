@@ -14,6 +14,15 @@ VOLUME="workspace-${NAME}"
 IMAGE="${WORKER_IMAGE:-ghcr.io/abendigo/claude-code-server-worker:latest}"
 STATE_DIR="/var/lib/claude-code-dispatch"
 
+# $NAME (ttyd-dispatch's SLUG) allows dots, e.g. "mark-oosterveld.org" --
+# fine for container/volume names but not for the VS Code tunnel name: the
+# tunnel service validates it as a "Labels" field against
+# '[\w-=]{1,50}' (no dots) and fails the whole tunnel with an HTTP 400 if it
+# doesn't match. Every email-derived slug has a dot in the domain, so this
+# bites every user, not just edge cases -- build a separate tunnel-safe
+# name instead of reusing $NAME directly.
+TUNNEL_SUFFIX="$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9_=-' '-')"
+
 mkdir -p "$STATE_DIR"
 
 if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
@@ -25,7 +34,7 @@ if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
         --privileged \
         --stop-timeout 20 \
         -e ANTHROPIC_API_KEY \
-        -e TUNNEL_NAME="${TUNNEL_NAME:-claude-code-server}-${NAME}" \
+        -e TUNNEL_NAME="$(printf '%s' "${TUNNEL_NAME:-claude-code-server}-${TUNNEL_SUFFIX}" | cut -c1-50)" \
         -v "${VOLUME}:/workspace" \
         "$IMAGE" >/dev/null
 elif [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" != "true" ]; then
