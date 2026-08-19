@@ -9,13 +9,24 @@ set -uo pipefail
 
 RAW_USER="${TTYD_USER:-}"
 
-# Fail closed: only a lowercase, POSIX-ish username gets a container. LDAP
-# usernames are already this shape in practice; anything else is refused
-# rather than guessed at.
-if [ -z "$RAW_USER" ] || ! [[ "$RAW_USER" =~ ^[a-z][a-z0-9_.-]{0,31}$ ]]; then
+# Authelia authenticates users as email addresses (e.g. mark@oosterveld.org).
+# Docker container/volume names can't contain '@', so normalize the identity
+# into a safe slug: lowercase, replace every char outside [a-z0-9_.-] with
+# '-', collapse repeats, and trim leading/trailing separators. The full
+# address is preserved (mark@oosterveld.org -> mark-oosterveld.org) so
+# distinct identities never collide onto the same workspace.
+SLUG="$(printf '%s' "$RAW_USER" \
+    | tr '[:upper:]' '[:lower:]' \
+    | sed -E 's/[^a-z0-9_.-]+/-/g; s/-{2,}/-/g; s/^[-._]+//; s/[-._]+$//' \
+    | cut -c1-64)"
+
+# Fail closed: an empty/garbage header leaves nothing to key a container on,
+# so refuse rather than guess. (A missing header never reaches here -- ttyd
+# rejects it with HTTP 407 before spawning this script.)
+if [ -z "$SLUG" ]; then
     echo "Access denied: no valid authenticated user."
     sleep 2
     exit 1
 fi
 
-exec /usr/local/bin/dispatch-to-worker "$RAW_USER"
+exec /usr/local/bin/dispatch-to-worker "$SLUG"
