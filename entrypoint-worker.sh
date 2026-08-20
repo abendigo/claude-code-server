@@ -5,6 +5,14 @@ set -e
 # --privileged (set by dispatch-to-worker when it creates this container).
 # This dockerd is entirely private to this container: no path back to the
 # host's real daemon or to any other user's worker.
+#
+# A prior run of this same container (its filesystem persists across
+# `docker stop`/`docker start`, unlike a fresh `docker run`) may have left
+# behind a stale pidfile if dockerd was ever killed uncleanly -- dockerd
+# then refuses to start at all ("pid file found"), which starved every
+# restart of this container of a working Docker-in-Docker forever. Clear it
+# before every start; harmless if it wasn't actually stale.
+rm -f /var/run/docker.pid
 dockerd >/var/log/dockerd.log 2>&1 &
 dockerd_pid=$!
 for _ in $(seq 1 30); do
@@ -59,7 +67,17 @@ TUNNEL_LINE="VS Code tunnel: https://vscode.dev/tunnel/${TUNNEL_NAME:-claude-cod
 write_motd() {
   {
     echo "$TUNNEL_LINE"
-    [ -n "${1:-}" ] && echo "$1"
+    # Plain `[ -n ... ] && echo` here is a `set -e` trap: called with no
+    # argument (the initial call below always is), the `[ -n ]` test fails,
+    # the whole `&&` list's exit status is 1, and since that's the last
+    # command run, it silently kills this entire script (its output is
+    # redirected into /etc/motd, not the terminal, so nothing is logged
+    # either) -- every worker died within seconds of every login until
+    # this was found. `if` is exempt from -e in a way a bare `&&` list
+    # isn't.
+    if [ -n "${1:-}" ]; then
+      echo "$1"
+    fi
   } > /etc/motd
 }
 write_motd
