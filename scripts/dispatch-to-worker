@@ -54,4 +54,31 @@ for _ in $(seq 1 30); do
     sleep 1
 done
 
-exec docker exec -it -u claude -w /workspace -e "TTYD_USER=${NAME}" -e HOME=/workspace "$CONTAINER" /usr/local/bin/ttyd-session
+# The stamp above only proves *connecting* happened; without more, a session
+# left open past IDLE_TIMEOUT_SECONDS looks idle to reap-idle-users and gets
+# stopped out from under an active user (see project memory,
+# reap_idle_active_session_fix). Keep refreshing it in the background for as
+# long as this connection stays open -- ttyd spawns one of these processes
+# per browser connection and it blocks on the docker exec below for the
+# session's whole lifetime, so "this process is still running" is a good
+# proxy for "still connected". The interval just needs to stay comfortably
+# under REAP_INTERVAL_SECONDS (default 300s).
+heartbeat() {
+    while sleep 60; do
+        date +%s > "${STATE_DIR}/${NAME}.lastseen"
+    done
+}
+heartbeat &
+heartbeat_pid=$!
+trap 'kill "$heartbeat_pid" 2>/dev/null || true' EXIT
+
+set +e
+docker exec -it -u claude -w /workspace -e "TTYD_USER=${NAME}" -e HOME=/workspace "$CONTAINER" /usr/local/bin/ttyd-session
+exit_code=$?
+set -e
+
+# One last stamp on the way out so a quick reconnect after a brief
+# disconnect isn't penalized either.
+date +%s > "${STATE_DIR}/${NAME}.lastseen"
+
+exit "$exit_code"

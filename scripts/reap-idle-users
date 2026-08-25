@@ -6,6 +6,12 @@
 # same old image forever -- dispatch-to-worker only ever `docker start`s an
 # existing container, it never checks for a newer image itself.
 #
+# "Dispatched to" isn't just the moment of connecting: dispatch-to-worker
+# keeps re-stamping .lastseen every 60s for as long as a connection stays
+# open, so an active session's idle clock never actually advances -- only
+# time since the last real disconnect counts. See project memory,
+# reap_idle_active_session_fix.
+#
 # The `docker stop` still happens first and is graceful, giving
 # entrypoint-worker.sh's SIGTERM trap a chance to flush the VS Code tunnel
 # cleanly before anything is torn down (see vscode_tunnel_graceful_shutdown_fix
