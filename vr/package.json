@@ -1,0 +1,10 @@
+{
+  "name": "claude-code-vr-hub",
+  "private": true,
+  "type": "module",
+  "description": "WebXR front end for the Claude Code server",
+  "dependencies": {
+    "@xterm/headless": "6.0.0",
+    "three": "0.186.1"
+  }
+}

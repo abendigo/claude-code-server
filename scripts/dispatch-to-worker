@@ -25,6 +25,15 @@ TUNNEL_SUFFIX="$(printf '%s' "$NAME" | tr -c 'A-Za-z0-9_=-' '-')"
 
 mkdir -p "$STATE_DIR"
 
+# One designated user (the person developing the VR client) gets the vr-hub's
+# live client volume mounted read-write, so they can edit what the hub serves
+# without an image rebuild (see scripts/vr-sync). Everyone else is unaffected.
+# Only takes effect when the container is *created*, not on resume.
+EXTRA_ARGS=()
+if [ -n "${VR_DEV_USER:-}" ] && [ "$NAME" = "$VR_DEV_USER" ]; then
+    EXTRA_ARGS+=(-v "${VR_CLIENT_VOLUME:-claude-vr-client}:/workspace/vr-live")
+fi
+
 if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
     echo "No environment yet for '${NAME}' -- creating one (this can take a minute on first login)..."
     docker run -d \
@@ -36,6 +45,7 @@ if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
         -e ANTHROPIC_API_KEY \
         -e TUNNEL_NAME="$(printf '%s' "${TUNNEL_NAME:-claude-code-server}-${TUNNEL_SUFFIX}" | cut -c1-50)" \
         -v "${VOLUME}:/workspace" \
+        "${EXTRA_ARGS[@]}" \
         "$IMAGE" >/dev/null
 elif [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" != "true" ]; then
     echo "Resuming environment for '${NAME}'..."
