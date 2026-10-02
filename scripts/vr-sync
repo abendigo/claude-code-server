@@ -1,0 +1,18 @@
+#!/bin/bash
+# Publish the VR client from a repo checkout into the live volume the vr-hub
+# serves, so edits show up on the next page reload with no image rebuild.
+# Only exists/works in the worker of VR_DEV_USER (the only one that gets the
+# volume mounted, at /workspace/vr-live -- see dispatch-to-worker).
+set -euo pipefail
+
+REPO="${1:-/workspace/dev/claude-code-server}"
+SRC="${REPO}/vr/client"
+DST=/workspace/vr-live
+
+[ -d "$SRC" ] || { echo "vr-sync: no $SRC" >&2; exit 1; }
+[ -d "$DST" ] || { echo "vr-sync: $DST isn't mounted -- is this the VR_DEV_USER's worker, recreated since VR_DEV_USER was set?" >&2; exit 1; }
+
+find "$DST" -mindepth 1 -delete
+cp -R "$SRC"/. "$DST"/
+chmod -R a+rwX "$DST"
+echo "vr-sync: published $(find "$DST" -type f | wc -l) files from $SRC"

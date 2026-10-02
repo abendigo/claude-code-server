@@ -23,6 +23,9 @@ jobs:
           - name: worker
             dockerfile: Dockerfile.worker
             image: ${{ github.repository }}-worker
+          - name: vr
+            dockerfile: Dockerfile.vr
+            image: ${{ github.repository }}-vr
 
     steps:
       - name: Checkout repository
