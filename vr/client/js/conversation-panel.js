@@ -91,7 +91,10 @@ export class ConversationPanel extends Panel {
   submit(text = this.input) {
     const t = text.trim();
     if (!t) return;
-    if (this.convo.state === 'waiting') return; // answer the approval first
+    if (this.convo.state === 'waiting') { // answer the approval first
+      this.convo.notice('Answer the approval first: Allow or Deny, or say "yes" or "no".', 'error');
+      return;
+    }
     const msg = this.convo.submit(t, { cwd: this.cwd, resume: this.resumeId });
     if (this.client.send(msg)) this.resumeId = null; // only the first prompt carries it
     if (text === this.input) this.input = '';
