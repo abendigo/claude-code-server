@@ -1,0 +1,70 @@
+#!/bin/bash
+# Recycle ONE user's worker onto the newest worker image: pull, compare, and if
+# the container runs an older image (or --force), stop it gracefully and remove
+# it, so the next login recreates it fresh. Never touches the user's volume.
+# Runs on the gateway (needs docker.sock); watch-recycle-requests calls it on
+# behalf of a worker that asked.
+#
+#   recycle-worker NAME [--force] [--notify]
+#     --force   recycle even if the image is current (picks up changed mounts / env)
+#     --notify  tell the worker what is about to happen, via a file it can read
+#               (/workspace/.recycle-result), written as the unprivileged user
+#
+# Exit status: 0 recycled, 10 already current, 1 error.
+set -uo pipefail
+
+NAME="${1:-}"
+[ -n "$NAME" ] || { echo "usage: recycle-worker NAME [--force] [--notify]" >&2; exit 1; }
+shift
+FORCE=0; NOTIFY=0
+for a in "$@"; do
+    case "$a" in
+        --force) FORCE=1 ;;
+        --notify) NOTIFY=1 ;;
+        *) echo "recycle-worker: unknown option $a" >&2; exit 1 ;;
+    esac
+done
+
+CONTAINER="claude-code-user-${NAME}"
+IMAGE="${WORKER_IMAGE:-ghcr.io/abendigo/claude-code-server-worker:latest}"
+GRACE_SECONDS="${RECYCLE_NOTICE_SECONDS:-4}"  # time to let the message be read before the session dies
+
+# Written as the worker's own unprivileged user: it owns /workspace and could
+# have planted a symlink there, which a root write would follow.
+tell() {
+    echo "$1"
+    [ "$NOTIFY" = 1 ] || return 0
+    docker exec -u claude -i "$CONTAINER" sh -c 'cat > /workspace/.recycle-result' <<<"$1" >/dev/null 2>&1 || true
+}
+
+docker inspect "$CONTAINER" >/dev/null 2>&1 || { echo "recycle-worker: no container ${CONTAINER}" >&2; exit 1; }
+
+pull_ok=1
+docker pull "$IMAGE" >/dev/null 2>&1 || pull_ok=0
+latest=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || echo "")
+current=$(docker inspect -f '{{.Image}}' "$CONTAINER" 2>/dev/null || echo "")
+
+if [ "$FORCE" = 0 ]; then
+    if [ "$pull_ok" = 0 ]; then
+        tell "Could not reach the image registry to check for a newer worker image. Nothing was changed."
+        exit 1
+    fi
+    if [ -z "$latest" ] || [ -z "$current" ]; then
+        tell "Could not determine image versions. Nothing was changed."
+        exit 1
+    fi
+    if [ "$latest" = "$current" ]; then
+        tell "Already up to date: this environment is running the newest worker image."
+        exit 10
+    fi
+    tell "A newer worker image is available. This environment is restarting now and your sessions will end. Log in again to get the new one."
+else
+    tell "Restarting this environment now (forced); your sessions will end. Log in again to get a fresh one."
+fi
+
+sleep "$GRACE_SECONDS"
+echo "recycle-worker: stopping ${CONTAINER}"
+docker stop -t 30 "$CONTAINER" >/dev/null 2>&1 || true
+docker rm "$CONTAINER" >/dev/null 2>&1 || { echo "recycle-worker: could not remove ${CONTAINER}" >&2; exit 1; }
+echo "recycle-worker: removed ${CONTAINER}; the next login recreates it"
+exit 0

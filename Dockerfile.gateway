@@ -41,7 +41,12 @@ COPY --from=ttyd-html /usr/local/share/ttyd/index.html /usr/local/share/ttyd/ind
 COPY scripts/ttyd-dispatch /usr/local/bin/ttyd-dispatch
 COPY scripts/dispatch-to-worker /usr/local/bin/dispatch-to-worker
 COPY scripts/reap-idle-users /usr/local/bin/reap-idle-users
-RUN chmod +x /usr/local/bin/ttyd-dispatch /usr/local/bin/dispatch-to-worker /usr/local/bin/reap-idle-users
+# recycle-worker / watch-recycle-requests: let a worker ask (via its update-worker
+# command) to be moved onto the newest image, without giving it Docker access.
+COPY scripts/recycle-worker /usr/local/bin/recycle-worker
+COPY scripts/watch-recycle-requests /usr/local/bin/watch-recycle-requests
+RUN chmod +x /usr/local/bin/ttyd-dispatch /usr/local/bin/dispatch-to-worker /usr/local/bin/reap-idle-users \
+    /usr/local/bin/recycle-worker /usr/local/bin/watch-recycle-requests
 
 COPY entrypoint-gateway.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

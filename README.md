@@ -82,3 +82,15 @@ Quest page --wss /agent/ws--> gateway (agent-gateway, :7682) --docker exec -i-->
 - Test: `cd vr && npm test`, `cd gateway-agent && npm test`.
 
 Known limits: a turn in progress ends if the headset disconnects (no background daemon yet); resuming a conversation continues it but doesn't replay the earlier messages; Claude's clarifying-question tool and subagent internals aren't surfaced yet; inline markdown (bold, backticks) is shown as plain text.
+
+
+### Updating a worker to the newest image
+
+Workers are recreated onto a newer image automatically once their owner has been fully disconnected for `IDLE_TIMEOUT_SECONDS` (see `reap-idle-users`). To do it sooner, run this inside the worker (or ask Claude to):
+
+```
+update-worker           # restart only if a newer image exists
+update-worker --force   # restart regardless, e.g. after changing VR_DEV_USER or other env/mounts
+```
+
+A worker has no Docker access, so the command leaves a request file in its own `/workspace`; the gateway's `watch-recycle-requests` notices within ~15s, pulls the image, replies through a file, and (if newer, or `--force`) stops and removes that one container. Your volume is untouched; **your terminal and agent sessions end**, and the next login creates the fresh worker. Tests: `node --test scripts/test/*.test.mjs`.

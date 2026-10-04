@@ -18,8 +18,12 @@ agent_pid=$!
 /usr/local/bin/reap-idle-users &
 reaper_pid=$!
 
+# Serve workers' update-worker requests (moves them onto the newest image).
+/usr/local/bin/watch-recycle-requests &
+recycler_pid=$!
+
 shutdown() {
-    kill "$reaper_pid" 2>/dev/null || true
+    kill "$reaper_pid" "$recycler_pid" 2>/dev/null || true
     kill -TERM "$agent_pid" 2>/dev/null || true
     kill -TERM "$ttyd_pid" 2>/dev/null || true
     wait "$ttyd_pid" 2>/dev/null || true

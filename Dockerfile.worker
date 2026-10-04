@@ -34,7 +34,8 @@ RUN printf '#!/bin/sh\nexec node /opt/agent-bridge/bridge.mjs "$@"\n' > /usr/loc
 # Install watch-gh-build helper script
 COPY scripts/watch-gh-build /usr/local/bin/watch-gh-build
 COPY scripts/vr-sync /usr/local/bin/vr-sync
-RUN chmod +x /usr/local/bin/watch-gh-build /usr/local/bin/vr-sync
+COPY scripts/update-worker /usr/local/bin/update-worker
+RUN chmod +x /usr/local/bin/watch-gh-build /usr/local/bin/vr-sync /usr/local/bin/update-worker
 
 # Install the VS Code CLI, used to run "code tunnel" for VS Code Remote
 # Tunnels (browser or desktop VS Code access without any inbound port).

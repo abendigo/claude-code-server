@@ -1,0 +1,36 @@
+#!/bin/bash
+# Ask the gateway to move THIS worker onto the newest worker image.
+#
+#   update-worker            restart only if a newer image exists
+#   update-worker --force    restart regardless (picks up changed mounts/env)
+#
+# A worker has no Docker access, so this just leaves a request file; the gateway
+# notices within ~15s, checks for a newer image, and replies through a file.
+# If it restarts, this terminal (and any agent session) ends: log in again.
+set -uo pipefail
+
+WS="${WORKSPACE_DIR:-/workspace}"
+WAIT="${UPDATE_WAIT_SECONDS:-120}"
+
+case "${1:-}" in
+    ""|--force) ;;
+    *) echo "usage: update-worker [--force]" >&2; exit 2 ;;
+esac
+
+mode="${1:-}"
+rm -f "$WS/.recycle-result"
+printf '%s' "${mode#--}" > "$WS/.recycle-request"
+echo "Asked the gateway to check for a newer worker image (this can take up to a minute)..."
+
+for _ in $(seq 1 "$WAIT"); do
+    if [ -s "$WS/.recycle-result" ]; then
+        cat "$WS/.recycle-result"
+        rm -f "$WS/.recycle-result"
+        exit 0
+    fi
+    sleep 1
+done
+
+rm -f "$WS/.recycle-request"
+echo "No answer from the gateway after ${WAIT}s, so nothing was changed. (Is the gateway on a version that supports update-worker?)" >&2
+exit 1
