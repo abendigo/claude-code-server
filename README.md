@@ -57,3 +57,13 @@ claude
 Built automatically via GitHub Actions on every push to `main`.
 - Gateway: `ghcr.io/YOUR_GITHUB_USERNAME/claude-code-server:latest`
 - Worker: `ghcr.io/YOUR_GITHUB_USERNAME/claude-code-server-worker:latest`
+
+## VR hub (Quest / WebXR)
+
+`vr-hub` serves a WebXR client at `https://<host>/vr/` (same Authelia login as the terminal). Terminals in VR connect to the gateway's ttyd, so nothing about workers changes.
+
+Environment (Portainer, set once): `STT_API_KEY` (speech-to-text key), optionally `STT_URL` / `STT_MODEL` (any OpenAI-compatible transcription endpoint, e.g. Groq's `whisper-large-v3-turbo` for low latency) and `VR_DEV_USER` (see below).
+
+**Releasing:** merge to `main`. CI builds all three images, then a final `deploy` job calls the Portainer webhook once, after every image is pushed. Nothing else is needed.
+
+**Live-editing the client from inside VR:** set `VR_DEV_USER` to your slug (e.g. `mark-oosterveld.org`) and recreate that user's worker once, so it gets the shared volume at `/workspace/vr-live`. Edit `vr/client/` in your checkout, run `vr-sync`, reload the page. The hub serves whichever is newer: the client baked into the image, or your last `vr-sync`. So a deploy after your last sync takes over automatically, and a sync after a deploy shows your edits until the next deploy.

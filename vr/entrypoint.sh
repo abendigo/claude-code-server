@@ -1,13 +1,8 @@
 #!/bin/sh
 set -e
 
-# Seed the served client directory from the image on first run (or when
-# forced). After that the volume is authoritative -- edit it with vr-sync
-# from a worker -- so redeploying the image never clobbers live edits.
-if [ ! -f /srv/client/index.html ] || [ "${VR_RESEED:-}" = "1" ]; then
-    echo "Seeding /srv/client from the image's default client."
-    cp -R /app/client-default/. /srv/client/
-    chmod -R a+rwX /srv/client 2>/dev/null || true
-fi
-
+# The hub serves the client baked into this image (/app/client-default) unless
+# /srv/client holds a newer vr-sync -- see clientDir() in server/server.js.
+# Nothing is copied or seeded, so deploying a new image can never be blocked
+# by (or clobber) what's in the volume.
 exec node /app/server/server.js

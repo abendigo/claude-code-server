@@ -62,8 +62,18 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
+  # Runs once, after *every* image is pushed. Calling the webhook from the
+  # gateway's own matrix job could make Portainer pull :latest for the worker
+  # or vr image before its build had finished.
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    env:
+      PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
+    steps:
       - name: Notify Portainer
-        if: matrix.name == 'gateway' && env.PORTAINER_WEBHOOK_URL != ''
-        env:
-          PORTAINER_WEBHOOK_URL: ${{ secrets.PORTAINER_WEBHOOK_URL }}
-        run: curl -s -o /dev/null -w "%{http_code}" -X POST "$PORTAINER_WEBHOOK_URL"
+        if: env.PORTAINER_WEBHOOK_URL != ''
+        run: |
+          code=$(curl -sS -o /dev/null -w '%{http_code}' -X POST "$PORTAINER_WEBHOOK_URL")
+          echo "Portainer webhook returned HTTP $code"
+          case "$code" in 2*) ;; *) exit 1 ;; esac

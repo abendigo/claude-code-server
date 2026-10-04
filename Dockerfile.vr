@@ -9,15 +9,18 @@ COPY vr/package.json vr/package-lock.json ./
 RUN npm ci --omit=dev
 
 COPY vr/server ./server
-# Baked-in default client; copied into the /srv/client volume on first start
-# (see vr/entrypoint.sh). The volume is what's actually served, so the client
-# can be edited live from a worker without rebuilding this image.
+# The client that ships in this image, plus when it was built. The hub serves
+# this unless someone has run vr-sync into the /srv/client volume *after* this
+# build (see vr/server/server.js), so a deploy always wins over stale live
+# edits, and live edits win until the next deploy. The stamp layer is only
+# rebuilt when the client changes, which is exactly when it should move.
 COPY vr/client /app/client-default
+RUN date +%s > /app/client-built
 COPY vr/entrypoint.sh /entrypoint.sh
 
-# World-writable so a new named volume inherits permissions that let the
-# (differently-uid'd) dev worker edit files in it. Dev-only volume, mounted
-# into just the one VR_DEV_USER's worker.
+# Live-edit overlay: written only by vr-sync from the VR_DEV_USER's worker.
+# World-writable so a new named volume inherits permissions that let that
+# (differently-uid'd) worker write to it.
 RUN chmod +x /entrypoint.sh && mkdir -p /srv/client && chmod 777 /srv/client
 
 USER node
