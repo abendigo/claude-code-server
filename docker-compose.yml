@@ -19,7 +19,17 @@ services:
       - "traefik.http.routers.claude-ttyd.entrypoints=websecure"
       - "traefik.http.routers.claude-ttyd.tls.certresolver=leresolver"
       - "traefik.http.routers.claude-ttyd.middlewares=authelia@docker"
+      - "traefik.http.routers.claude-ttyd.service=claude-ttyd"
       - "traefik.http.services.claude-ttyd.loadbalancer.server.port=7681"
+      # Agent view websocket (wss://<host>/agent/ws). Two services live on this
+      # container, so every router must name its service explicitly.
+      - "traefik.http.routers.claude-agent.rule=Host(`claude.frustrated.blog`) && PathPrefix(`/agent`)"
+      - "traefik.http.routers.claude-agent.entrypoints=websecure"
+      - "traefik.http.routers.claude-agent.tls.certresolver=leresolver"
+      - "traefik.http.routers.claude-agent.middlewares=authelia@docker,claude-agent-strip"
+      - "traefik.http.routers.claude-agent.service=claude-agent"
+      - "traefik.http.middlewares.claude-agent-strip.stripprefix.prefixes=/agent"
+      - "traefik.http.services.claude-agent.loadbalancer.server.port=7682"
     networks:
       - traefik_default
 
@@ -36,6 +46,8 @@ services:
       - STT_API_KEY=${STT_API_KEY:-}
       - STT_URL=${STT_URL:-https://api.openai.com/v1/audio/transcriptions}
       - STT_MODEL=${STT_MODEL:-whisper-1}
+      # Agent view: working directory Claude starts in (inside the worker).
+      - AGENT_CWD=${AGENT_CWD:-/workspace}
     volumes:
       - vr-client:/srv/client
     labels:

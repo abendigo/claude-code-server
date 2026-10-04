@@ -4,6 +4,7 @@
 // add() it below.
 import * as THREE from 'three';
 import { TerminalPanel } from './terminal-panel.js';
+import { ConversationPanel } from './conversation-panel.js';
 import { quickKeys, snippetPanel } from './button-panel.js';
 import { KeyboardPanel } from './keyboard-panel.js';
 import { VoicePanel } from './voice-panel.js';
@@ -37,6 +38,7 @@ camera.lookAt(0, 1.3, -1.4);
 // ---- panels --------------------------------------------------------------
 const panels = [];
 const terminals = [];
+const focusables = []; // things that take typing/dictation: the conversation, then terminals
 let focused = null;
 
 function add(panel, { pos, rotY = 0, rotX = 0 }) {
@@ -49,16 +51,31 @@ function add(panel, { pos, rotY = 0, rotX = 0 }) {
 
 function focus(t) {
   focused = t;
-  terminals.forEach((x) => x.setFocused(x === t));
+  focusables.forEach((x) => x.setFocused(x === t));
 }
 
-for (const [i, x, rotY] of [[1, -0.8, 0.3], [2, 0.8, -0.3]]) {
+// The conversation with Claude is the main view; terminals are the escape hatch
+// (?terms=N for more than one). Both can be grabbed and moved.
+const params = new URLSearchParams(location.search);
+const termCount = Number(params.get('terms') ?? 1);
+
+if (cfg.agentUrl && params.get('agent') !== '0') {
+  const convo = new ConversationPanel({ agentUrl: cfg.agentUrl, cwd: cfg.agentCwd });
+  convo.onActivate = focus;
+  focusables.push(convo);
+  add(convo, { pos: [0, 1.6, -1.45] });
+}
+
+for (let i = 1; i <= termCount; i++) {
   const t = new TerminalPanel({ name: `term ${i}`, ttydUrl: cfg.ttydUrl });
   t.onActivate = focus;
   terminals.push(t);
-  add(t, { pos: [x, 1.6, -1.3], rotY });
+  focusables.push(t);
+  const side = i % 2 ? -1 : 1;
+  const col = Math.ceil(i / 2) - 1;
+  add(t, { pos: [side * (1.65 + col * 1.1), 1.55, -1.0 - col * 0.2], rotY: -side * 0.75 });
 }
-focus(terminals[0]);
+focus(focusables[0]);
 
 const sendToFocused = (s) => focused?.send(s);
 
@@ -75,7 +92,7 @@ add(quickKeys(sendToFocused, { onToggleKeyboard: () => { keyboard.mesh.visible =
 const snippets = await fetch('snippets.json').then((r) => r.json()).catch(() => []);
 if (snippets.length) add(snippetPanel(snippets, sendToFocused), { pos: [0.85, 0.95, -0.85], rotY: -0.5, rotX: -0.35 });
 
-window.__vr = { scene, panels, terminals, focus, voice, renderer }; // for debugging from the console
+window.__vr = { scene, panels, terminals, focusables, focus, voice, renderer }; // for debugging from the console
 
 // ---- pointers (two controllers + the mouse) --------------------------------
 const raycaster = new THREE.Raycaster();
@@ -113,6 +130,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   mouse.active = true;
 });
 renderer.domElement.addEventListener('pointerleave', () => { mouse.active = false; });
+renderer.domElement.addEventListener('wheel', (e) => { mouse.hit?.panel.onScroll?.(-e.deltaY / 60); }, { passive: true });
 renderer.domElement.addEventListener('pointerdown', () => { if (mouse.hit) mouse.hit.panel.click(mouse.hit.uv); });
 
 function buzz(p) {
@@ -153,9 +171,11 @@ function pollButtons(dt) {
       if (a === false) voicePanel.pttUp();
       if (edge(5) === true) focused?.send('\r');
     } else if (hand === 'left' && a === true) {
-      focus(terminals[(terminals.indexOf(focused) + 1) % terminals.length]);
+      focus(focusables[(focusables.indexOf(focused) + 1) % focusables.length]);
     }
     p.prev = gp.buttons.map((b) => b.pressed);
+    const stick = gp.axes[3] ?? 0;
+    if (!p.grabbed && p.hit?.panel.onScroll && Math.abs(stick) > 0.2) p.hit.panel.onScroll(-stick * dt * 20);
     if (p.grabbed) {
       const y = gp.axes[3] ?? 0;
       if (Math.abs(y) > 0.2) {
@@ -240,7 +260,7 @@ async function setupMic() {
   else { btn.hidden = false; btn.onclick = tryInit; }
 }
 
-fetch('api/whoami').then((r) => r.json()).then((w) => { note.textContent = `Signed in as ${w.user}. Grip = move panel (thumbstick resizes), A = talk (tap or hold), B = Enter, X = switch terminal.`; })
+fetch('api/whoami').then((r) => r.json()).then((w) => { note.textContent = `Signed in as ${w.user}. Grip = move panel (thumbstick resizes), thumbstick = scroll, A = talk (tap or hold), B = send, X = switch panel.`; })
   .catch(() => { note.textContent = 'Not signed in?'; });
 setupButtons();
 setupMic();

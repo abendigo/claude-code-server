@@ -15,10 +15,10 @@ const mod = (label, m, w) => ({ label, mod: m, w });
 
 const ROWS = [
   [pair('`', '~'), pair('1', '!'), pair('2', '@'), pair('3', '#'), pair('4', '$'), pair('5', '%'), pair('6', '^'),
-    pair('7', '&'), pair('8', '*'), pair('9', '('), pair('0', ')'), pair('-', '_'), pair('=', '+'), named('⌫', 'Backspace', 1.6)],
+    pair('7', '&'), pair('8', '*'), pair('9', '('), pair('0', ')'), pair('-', '_'), pair('=', '+'), named('Bksp', 'Backspace', 1.6)],
   [named('Tab', 'Tab', 1.4), ...letters('qwertyuiop'), pair('[', '{'), pair(']', '}'), pair('\\', '|')],
   [mod('Ctrl', 'ctrl', 1.7), ...letters('asdfghjkl'), pair(';', ':'), pair("'", '"'), named('Enter', 'Enter', 1.7)],
-  [mod('⇧', 'shift', 2.1), ...letters('zxcvbnm'), pair(',', '<'), pair('.', '>'), pair('/', '?'), mod('⇧', 'shift', 1.5)],
+  [mod('Shift', 'shift', 2.1), ...letters('zxcvbnm'), pair(',', '<'), pair('.', '>'), pair('/', '?'), mod('Shift', 'shift', 1.5)],
   [named('Esc', 'Escape', 1.4), mod('Alt', 'alt', 1.4), { label: 'space', key: ' ', w: 6 },
     named('←', 'ArrowLeft'), named('↓', 'ArrowDown'), named('↑', 'ArrowUp'), named('→', 'ArrowRight')],
 ];

@@ -1,0 +1,207 @@
+// ConversationPanel and its voice integration, with a stub canvas and a fake
+// websocket: no browser needed.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+
+// ---- browser stubs (must exist before the modules are imported) ----------------
+const drawn = [];
+const ctx = new Proxy({}, {
+  get: (_t, k) => (k === 'measureText' ? (s) => ({ width: String(s).length * 14 }) : k === 'fillText' ? (s) => drawn.push(String(s)) : () => {}),
+  set: () => true,
+});
+globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => ctx }) };
+globalThis.location = { href: 'https://host.example/vr/' };
+const storage = {};
+globalThis.localStorage = { getItem: (k) => storage[k] ?? null, setItem: (k, v) => { storage[k] = String(v); }, removeItem: (k) => { delete storage[k]; } };
+class FakeWS {
+  static OPEN = 1;
+  static last = null;
+  constructor(url) { this.url = String(url); this.sent = []; this.readyState = 1; FakeWS.last = this; setTimeout(() => this.onopen?.(), 0); }
+  send(d) { this.sent.push(JSON.parse(d)); }
+  close() { this.readyState = 3; }
+  emit(obj) { this.onmessage?.({ data: JSON.stringify(obj) }); }
+}
+globalThis.WebSocket = FakeWS;
+
+const { ConversationPanel } = await import('../client/js/conversation-panel.js');
+const { VoicePanel } = await import('../client/js/voice-panel.js');
+const { init, reply, toolUse, toolResult, result, permissionRequest } = await import('./fixtures.mjs');
+const tick = () => new Promise((r) => setTimeout(r, 5));
+
+async function make(opts = {}) {
+  for (const k of Object.keys(storage)) delete storage[k];
+  const p = new ConversationPanel({ agentUrl: '/agent/ws', cwd: '/workspace/proj', ...opts });
+  await tick();
+  return { p, ws: FakeWS.last };
+}
+const draw = (p) => { drawn.length = 0; p.draw(ctx, p.pxW, p.pxH); return drawn.join('\n'); };
+// Draw, find the button with this label, and click its centre.
+function clickByText(p, text) {
+  draw(p);
+  const spot = p.spots.find((s) => s.label === text);
+  assert.ok(spot, `"${text}" should be clickable`);
+  p.onClick({ u: (spot.x + spot.w / 2) / p.pxW, v: (spot.y + spot.h / 2) / p.pxH });
+}
+
+test('connects to the agent url and starts idle', async () => {
+  const { p, ws } = await make();
+  assert.match(ws.url, /^wss:\/\/host\.example\/agent\/ws$/);
+  assert.equal(p.convo.state, 'idle');
+});
+
+test('typing and Enter sends a prompt with the working directory; input clears', async () => {
+  const { p, ws } = await make();
+  for (const ch of 'hi there') p.send(ch);
+  p.send('\x7f'); // backspace
+  p.send('\r');
+  assert.deepEqual(ws.sent, [{ type: 'prompt', text: 'hi ther', cwd: '/workspace/proj' }]);
+  assert.equal(p.input, '');
+  assert.equal(p.convo.state, 'working');
+});
+
+test('paste fills the input without sending; Escape clears it', async () => {
+  const { p, ws } = await make();
+  p.paste('some dictated text');
+  assert.equal(p.input, 'some dictated text');
+  assert.equal(ws.sent.length, 0);
+  p.send('\x1b');
+  assert.equal(p.input, '');
+});
+
+test('permission card shows Allow / Always allow / Deny and clicking Allow answers', async () => {
+  const { p, ws } = await make();
+  p.submit('touch a file');
+  [init, ...toolUse('t1', 'Bash', { command: 'touch x', description: 'Create x' }), permissionRequest('p1', 'Bash', { command: 'touch x', description: 'Create x' })].forEach((m) => ws.emit(m));
+  const text = draw(p);
+  assert.match(text, /Claude wants to:/);
+  assert.match(text, /touch x/);
+  for (const label of ['Allow', 'Always allow', 'Deny']) assert.ok(text.includes(label), label);
+  ws.sent.length = 0;
+  clickByText(p, 'Allow');
+  assert.deepEqual(ws.sent, [{ type: 'permission', id: 'p1', allow: true, always: false }]);
+  assert.equal(p.convo.state, 'working');
+});
+
+test('Deny and Always allow send the right answers', async () => {
+  for (const [label, want] of [['Deny', { allow: false, always: false }], ['Always allow', { allow: true, always: true }]]) {
+    const { p, ws } = await make();
+    p.submit('x');
+    ws.emit(permissionRequest('p9', 'Bash', { command: 'rm y' }));
+    ws.sent.length = 0;
+    clickByText(p, label);
+    assert.deepEqual(ws.sent, [{ type: 'permission', id: 'p9', ...want }]);
+  }
+});
+
+test('cannot send a new message while an approval is pending', async () => {
+  const { p, ws } = await make();
+  p.submit('first');
+  ws.emit(permissionRequest('p1', 'Bash', { command: 'x' }));
+  ws.sent.length = 0;
+  p.paste('second');
+  p.send('\r');
+  assert.equal(ws.sent.length, 0);
+});
+
+test('conversation renders messages, tool cards and streaming text', async () => {
+  const { p, ws } = await make();
+  p.submit('do the thing');
+  [init, ...reply('a1', 'Sure, I will do it'), ...toolUse('t1', 'Bash', { command: 'ls', description: 'List files' }), toolResult('t1', 'a b'), result()].forEach((m) => ws.emit(m));
+  const text = draw(p);
+  assert.match(text, /do the thing/);
+  assert.match(text, /Sure, I will do it/);
+  assert.match(text, /List files/);
+  assert.equal(p.lines.find((l) => l.text === 'List files')?.mark, 'ok'); // drawn as a shape, not a font glyph
+  assert.match(text, /ready/);
+});
+
+test('scrolling up shows the "newer below" hint and ▼ returns to the bottom', async () => {
+  const { p, ws } = await make();
+  for (let i = 0; i < 40; i++) [...reply('a' + i, `Line number ${i} of a long answer`)].forEach((m) => ws.emit(m));
+  assert.doesNotMatch(draw(p), /newer below/);
+  p.onScroll(10);
+  assert.ok(p.scroll > 0);
+  assert.match(draw(p), /newer below/);
+  clickByText(p, '▼');
+  assert.equal(p.scroll, 0);
+});
+
+test('session id is remembered; Resume sends it with the first prompt only', async () => {
+  const { p, ws } = await make();
+  ws.emit(init);
+  assert.equal(storage['vr.agent.session'], 'sess-1');
+  p.resume();
+  const ws2 = FakeWS.last;
+  await tick();
+  p.submit('continue please');
+  p.submit('and again');
+  assert.deepEqual(ws2.sent.map((m) => m.resume), ['sess-1', undefined]);
+});
+
+test('New clears the remembered session', async () => {
+  const { p, ws } = await make();
+  ws.emit(init);
+  p.newConversation();
+  assert.equal(storage['vr.agent.session'], undefined);
+});
+
+// ---- voice -> conversation --------------------------------------------------------
+function voiceFor(panel, spoken) {
+  const voice = { ready: true, start: () => true, stop: async () => new Blob([new Uint8Array(5000)]), transcribe: async () => ({ text: spoken, ms: 10 }) };
+  const vp = new VoicePanel({ voice, getTarget: () => panel, sttEnabled: true });
+  return vp;
+}
+async function dictate(vp) {
+  vp.startRecording();
+  await vp.stopRecording();
+}
+
+test('saying "yes" while an approval is pending answers it (and is not sent as a message)', async () => {
+  const { p, ws } = await make();
+  p.submit('x');
+  ws.emit(permissionRequest('p1', 'Bash', { command: 'touch x' }));
+  ws.sent.length = 0;
+  await dictate(voiceFor(p, 'Yes.'));
+  assert.deepEqual(ws.sent, [{ type: 'permission', id: 'p1', allow: true, always: false }]);
+});
+
+test('"always allow" and "no" map correctly', async () => {
+  for (const [said, want] of [['Always allow', { allow: true, always: true }], ['No.', { allow: false, always: false }]]) {
+    const { p, ws } = await make();
+    p.submit('x');
+    ws.emit(permissionRequest('p1', 'Bash', { command: 'touch x' }));
+    ws.sent.length = 0;
+    await dictate(voiceFor(p, said));
+    assert.deepEqual(ws.sent, [{ type: 'permission', id: 'p1', ...want }]);
+  }
+});
+
+test('a sentence containing "yes" during an approval goes to review, not auto-approve', async () => {
+  const { p, ws } = await make();
+  p.submit('x');
+  ws.emit(permissionRequest('p1', 'Bash', { command: 'touch x' }));
+  ws.sent.length = 0;
+  const vp = voiceFor(p, 'Yes but only inside the tests folder');
+  await dictate(vp);
+  assert.equal(ws.sent.length, 0);
+  assert.equal(vp.state, 'review');
+});
+
+test('dictation with no approval pending is sent as a message, in prose (not command) style', async () => {
+  const { p, ws } = await make();
+  const vp = voiceFor(p, 'Please run the tests.');
+  vp.direct = true; // skip the review step
+  vp.mode = 'command'; // would lowercase and strip the period for a terminal
+  await dictate(vp);
+  assert.deepEqual(ws.sent.map((m) => [m.type, m.text]), [['prompt', 'Please run the tests.']]);
+});
+
+test('review then "Send" delivers dictation to the conversation', async () => {
+  const { p, ws } = await make();
+  const vp = voiceFor(p, 'Fix the failing test');
+  vp.direct = false;
+  await dictate(vp);
+  assert.equal(vp.state, 'review');
+  vp.confirm(false);
+  assert.deepEqual(ws.sent.map((m) => m.text), ['Fix the failing test']);
+});

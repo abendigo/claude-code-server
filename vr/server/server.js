@@ -24,6 +24,9 @@ const MODULES_DIR = process.env.MODULES_DIR || path.join(here, '..', 'node_modul
 // same-origin '/ws'; if the hub ever moves to its own subdomain, set this to
 // 'wss://claude.frustrated.blog/ws' and nothing else changes.
 const TTYD_URL = process.env.TTYD_URL || '/ws';
+// Agent view websocket (served by the gateway) and the directory Claude starts in.
+const AGENT_URL = process.env.AGENT_URL || '/agent/ws';
+const AGENT_CWD = process.env.AGENT_CWD || '';
 
 // Speech-to-text: any OpenAI-compatible /audio/transcriptions endpoint. Point
 // STT_URL at a self-hosted whisper server to swap providers without code changes.
@@ -163,7 +166,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/config.json') {
-      return sendJson(res, 200, { ttydUrl: TTYD_URL, sttEnabled: Boolean(STT_KEY) });
+      return sendJson(res, 200, { ttydUrl: TTYD_URL, agentUrl: AGENT_URL, agentCwd: AGENT_CWD, sttEnabled: Boolean(STT_KEY) });
     }
 
     for (const [prefix, target] of Object.entries(VENDOR)) {

@@ -10,19 +10,26 @@ mkdir -p /var/lib/claude-code-dispatch
 ttyd -W -w / -p 7681 -I /usr/local/share/ttyd/index.html -H Remote-User /usr/local/bin/ttyd-dispatch &
 ttyd_pid=$!
 
+# Websocket front for the VR client's agent view (Traefik routes /agent here).
+node /opt/agent-gateway/server.mjs &
+agent_pid=$!
+
 # Stop worker containers nobody has used in a while. See reap-idle-users.
 /usr/local/bin/reap-idle-users &
 reaper_pid=$!
 
 shutdown() {
     kill "$reaper_pid" 2>/dev/null || true
+    kill -TERM "$agent_pid" 2>/dev/null || true
     kill -TERM "$ttyd_pid" 2>/dev/null || true
     wait "$ttyd_pid" 2>/dev/null || true
+    wait "$agent_pid" 2>/dev/null || true
     exit 0
 }
 trap shutdown TERM INT
 
 echo "Claude Code gateway started."
 echo "  ttyd: port 7681 (routes each authenticated user to their own worker container)"
+echo "  agent gateway: port 7682 (websocket to each user's agent-bridge)"
 
 wait

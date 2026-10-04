@@ -25,6 +25,13 @@ RUN apt-get update && apt-get install -y \
 RUN curl -L https://github.com/tsl0922/ttyd/releases/latest/download/ttyd.x86_64 -o /usr/local/bin/ttyd && \
     chmod +x /usr/local/bin/ttyd
 
+# Agent gateway: websocket front for the per-user agent-bridge (see
+# gateway-agent/server.mjs). Runs next to ttyd in this container because it
+# needs the same docker.sock access dispatch-to-worker already has.
+COPY gateway-agent/package.json gateway-agent/package-lock.json /opt/agent-gateway/
+RUN cd /opt/agent-gateway && npm ci --omit=dev
+COPY gateway-agent/server.mjs /opt/agent-gateway/server.mjs
+
 # Copy custom ttyd frontend from build stage
 COPY --from=ttyd-html /usr/local/share/ttyd/index.html /usr/local/share/ttyd/index.html
 
@@ -39,6 +46,6 @@ RUN chmod +x /usr/local/bin/ttyd-dispatch /usr/local/bin/dispatch-to-worker /usr
 COPY entrypoint-gateway.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 7681
+EXPOSE 7681 7682
 
 ENTRYPOINT ["/entrypoint.sh"]

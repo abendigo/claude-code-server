@@ -46,3 +46,15 @@ export function cleanTranscript(raw, mode = 'prompt') {
   }
   return t;
 }
+
+// Spoken answers to an approval prompt. Deliberately strict: only short phrases
+// count, so a sentence that merely contains "no" or "yes" is never mistaken for
+// an answer. Returns 'allow' | 'always' | 'deny' | null.
+export function approvalIntent(raw) {
+  const t = String(raw).toLowerCase().replace(/[^a-z' ]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t || t.split(' ').length > 4) return null;
+  if (/^(yes )?(always|always allow|allow always|yes always)$/.test(t)) return 'always';
+  if (/^(yes|yeah|yep|yup|sure|okay|ok|allow|allow it|approve|approved|go ahead|do it|proceed|that's fine|sounds good)$/.test(t)) return 'allow';
+  if (/^(no|nope|nah|deny|denied|reject|don't|do not|stop|cancel|never mind|no way)$/.test(t)) return 'deny';
+  return null;
+}

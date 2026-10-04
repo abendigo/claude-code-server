@@ -5,7 +5,7 @@
 // Nothing is ever followed by Enter automatically except via "Send + Enter",
 // so a mis-heard word can't run as a command on its own.
 import { Panel, roundRect, wrapText } from './panel.js';
-import { cleanTranscript } from './transcript.js';
+import { cleanTranscript, approvalIntent } from './transcript.js';
 
 const FONT = 'ui-sans-serif, system-ui, sans-serif';
 const HOLD_MS = 450; // A held longer than this is push-to-talk; a tap leaves recording running
@@ -53,8 +53,10 @@ export class VoicePanel extends Panel {
     })();
     const bw = (this.pxW - 40 - 20 * Math.max(state.length - 1, 0)) / Math.max(state.length, 1);
     const bottom = state.map((b, i) => ({ ...b, x: 20 + i * (bw + 20), y: this.pxH - 150, w: bw, h: 130, big: true }));
+    // Talking to Claude is always prose, so the terminal-only Command/Prompt switch doesn't apply.
+    const chat = Boolean(this.getTarget()?.voiceSubmits);
     const toggles = [
-      { label: `Mode: ${this.mode === 'command' ? 'Command' : 'Prompt'}`, act: () => this.toggleMode(), x: this.pxW - 640, y: 14, w: 300, h: 64 },
+      { label: chat ? 'Mode: Chat' : `Mode: ${this.mode === 'command' ? 'Command' : 'Prompt'}`, act: () => (chat ? null : this.toggleMode()), x: this.pxW - 640, y: 14, w: 300, h: 64 },
       { label: `After: ${this.direct ? 'Direct' : 'Review'}`, act: () => this.toggleDirect(), x: this.pxW - 330, y: 14, w: 310, h: 64 },
     ];
     return [...bottom, ...toggles];
@@ -133,7 +135,19 @@ export class VoicePanel extends Panel {
       const { text, ms } = await this.voice.transcribe(blob);
       const secs = (v) => (v / 1000).toFixed(1);
       this.note = `speech service ${secs(ms)}s, total ${secs(performance.now() - t0)}s`;
-      this.text = cleanTranscript(text, this.mode);
+      const target = this.getTarget();
+      // While Claude is waiting for an answer, "yes" / "no" / "always allow" are
+      // answers, not messages. Handled before anything else.
+      const intent = target?.pendingPermission ? approvalIntent(text) : null;
+      if (intent) {
+        target.answerPermission(intent);
+        this.state = 'idle';
+        this.note = `${{ allow: 'Allowed', always: 'Always allowed', deny: 'Denied' }[intent]} (${this.note})`;
+        this.markDirty();
+        return;
+      }
+      // Talking to Claude is prose; the Command-mode shell clean-up is only for terminals.
+      this.text = cleanTranscript(text, target?.voiceSubmits ? 'prompt' : this.mode);
       if (!this.text) { this.state = 'idle'; this.note = "Didn't catch that. " + this.note; }
       else if (this.direct) { this.deliver(false); this.state = 'idle'; this.note = `Sent "${this.text}" (${this.note})`; }
       else this.state = 'review';
@@ -151,6 +165,8 @@ export class VoicePanel extends Panel {
   deliver(enter) {
     const target = this.getTarget();
     if (!target || !this.text) return;
+    // A conversation takes dictation as a message; a terminal gets keystrokes.
+    if (target.voiceSubmits) { target.submit(this.text); return; }
     target.paste(this.text);
     if (enter) target.send('\r');
   }

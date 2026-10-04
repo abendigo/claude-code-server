@@ -1,0 +1,12 @@
+{
+  "name": "claude-code-agent-gateway",
+  "private": true,
+  "type": "module",
+  "description": "Websocket front for per-user agent-bridge processes (runs in the gateway container)",
+  "dependencies": {
+    "ws": "8.22.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  }
+}
