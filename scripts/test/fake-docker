@@ -1,0 +1,22 @@
+#!/bin/bash
+# Just enough docker for recycle-worker / watch-recycle-requests tests.
+# Env: FAKE_LOG, FAKE_ROOT (each container's /workspace is $FAKE_ROOT/<container>/),
+#      FAKE_CONTAINERS, FAKE_LATEST, FAKE_CURRENT, FAKE_PULL_FAIL
+echo "docker $*" >> "$FAKE_LOG"
+case "$1" in
+  ps) for c in $FAKE_CONTAINERS; do echo "$c"; done; exit 0 ;;
+  pull) [ -n "${FAKE_PULL_FAIL:-}" ] && exit 1; exit 0 ;;
+  image) echo "$FAKE_LATEST"; exit 0 ;;
+  inspect)
+    if [ "$2" = "-f" ]; then case "$3" in *Image*) echo "$FAKE_CURRENT" ;; *Running*) echo true ;; esac; fi
+    exit 0 ;;
+  stop|rm) exit 0 ;;
+  exec)
+    shift
+    while [[ "${1:-}" == -* ]]; do case "$1" in -u|-w|-e) shift 2 ;; *) shift ;; esac; done
+    container="$1"; shift
+    cmd=()
+    for a in "$@"; do cmd+=("${a//\/workspace\//$FAKE_ROOT/$container/}"); done
+    exec "${cmd[@]}" ;;
+esac
+exit 0

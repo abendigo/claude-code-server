@@ -1,0 +1,33 @@
+#!/bin/bash
+# Gateway background loop: a worker can't touch Docker, so to recycle itself it
+# drops a request file in its own /workspace (see update-worker). This looks for
+# those files in every running worker and hands each to recycle-worker, which
+# only ever acts on the container the request came from. Everything runs as
+# the worker's unprivileged user inside it, never as root.
+#
+#   watch-recycle-requests          loop forever
+#   watch-recycle-requests --once   one pass (used by tests)
+set -uo pipefail
+
+INTERVAL="${RECYCLE_POLL_SECONDS:-15}"
+REQ=/workspace/.recycle-request
+
+pass() {
+    local c name content opts
+    for c in $(docker ps --filter label=claude-code.managed=true --format '{{.Names}}' 2>/dev/null); do
+        docker exec -u claude "$c" test -f "$REQ" >/dev/null 2>&1 || continue
+        content=$(docker exec -u claude "$c" head -c 32 "$REQ" 2>/dev/null || true)
+        docker exec -u claude "$c" rm -f "$REQ" >/dev/null 2>&1 || true
+        name="${c#claude-code-user-}"
+        opts=(--notify)
+        case "$content" in *force*) opts+=(--force) ;; esac
+        echo "watch-recycle-requests: '${name}' asked for an update (${opts[*]})"
+        /usr/local/bin/recycle-worker "$name" "${opts[@]}" || true
+    done
+}
+
+if [ "${1:-}" = "--once" ]; then pass; exit 0; fi
+while true; do
+    pass
+    sleep "$INTERVAL"
+done
