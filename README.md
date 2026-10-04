@@ -67,3 +67,18 @@ Environment (Portainer, set once): `STT_API_KEY` (speech-to-text key), optionall
 **Releasing:** merge to `main`. CI builds all three images, then a final `deploy` job calls the Portainer webhook once, after every image is pushed. Nothing else is needed.
 
 **Live-editing the client from inside VR:** set `VR_DEV_USER` to your slug (e.g. `mark-oosterveld.org`) and recreate that user's worker once, so it gets the shared volume at `/workspace/vr-live`. Edit `vr/client/` in your checkout, run `vr-sync`, reload the page. The hub serves whichever is newer: the client baked into the image, or your last `vr-sync`. So a deploy after your last sync takes over automatically, and a sync after a deploy shows your edits until the next deploy.
+
+### Agent view (conversation instead of a terminal)
+
+The VR page's main panel is a conversation with Claude Code rather than a terminal: your messages, Claude's streaming replies, one-line tool cards, and Allow / Always allow / Deny buttons when Claude asks permission (or just say "yes" / "no" / "always allow"). Terminals remain available (`?terms=N`, or `?agent=0` to hide the conversation).
+
+```
+Quest page --wss /agent/ws--> gateway (agent-gateway, :7682) --docker exec -i--> agent-bridge (in your worker) --> Claude Agent SDK
+```
+
+- `agent/bridge.mjs` runs inside each worker and drives one Claude Code session over stdio (JSON lines). It uses the SDK's own matching Claude Code binary and the same `~/.claude` login and settings as the terminal (user/project/local settings apply, so your own allow rules and permission mode still count). Read-only tools (`Read`, `Glob`, `Grep`, `TodoWrite`) never ask; everything else asks.
+- `gateway-agent/server.mjs` authenticates via the `Remote-User` header Authelia sets, rejects cross-site websocket origins, and starts `dispatch-to-worker <user> agent-bridge` per connection (so it creates/starts the worker exactly as a terminal login does and keeps the idle reaper informed). Max 4 connections per user.
+- Set `AGENT_CWD` on the stack (default `/workspace`) to choose the directory Claude starts in.
+- Test: `cd vr && npm test`, `cd gateway-agent && npm test`.
+
+Known limits: a turn in progress ends if the headset disconnects (no background daemon yet); resuming a conversation continues it but doesn't replay the earlier messages; Claude's clarifying-question tool and subagent internals aren't surfaced yet; inline markdown (bold, backticks) is shown as plain text.

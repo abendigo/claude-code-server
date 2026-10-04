@@ -22,6 +22,15 @@ RUN apt-get update && apt-get install -y \
 # Install Claude Code globally
 RUN npm install -g @anthropic-ai/claude-code
 
+# agent-bridge: drives one Claude Code session over stdio for the VR client's
+# conversation view (the gateway runs it via `docker exec -i`). The SDK brings
+# its own matching Claude Code binary, so it is independent of the CLI above.
+COPY agent/package.json agent/package-lock.json /opt/agent-bridge/
+RUN cd /opt/agent-bridge && npm ci --omit=dev
+COPY agent/bridge.mjs /opt/agent-bridge/bridge.mjs
+RUN printf '#!/bin/sh\nexec node /opt/agent-bridge/bridge.mjs "$@"\n' > /usr/local/bin/agent-bridge && \
+    chmod +x /usr/local/bin/agent-bridge
+
 # Install watch-gh-build helper script
 COPY scripts/watch-gh-build /usr/local/bin/watch-gh-build
 COPY scripts/vr-sync /usr/local/bin/vr-sync

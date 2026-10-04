@@ -2,6 +2,12 @@
 # Get-or-create the worker container for a given username, then exec into
 # it. Shared by ttyd-dispatch today; a future ssh-dispatch can reuse it too.
 #
+#   dispatch-to-worker NAME            interactive terminal (ttyd-session, with a tty)
+#   dispatch-to-worker NAME CMD [ARGS] run CMD (a program in /usr/local/bin) in the
+#                                      worker over plain stdio, no tty -- used by the
+#                                      agent gateway. Progress messages go to stderr
+#                                      so stdout carries only CMD's output.
+#
 # Runs as root on the gateway (needs the mounted docker.sock). The caller is
 # responsible for validating $1 against a strict charset first -- this
 # script trusts its argument enough to use it in container/volume names and
@@ -9,10 +15,13 @@
 set -euo pipefail
 
 NAME="$1"
+shift
+if [ "$#" -gt 0 ]; then AGENT_MODE=1; READY_CMD="$1"; else AGENT_MODE=; READY_CMD=ttyd-session; fi
+say() { if [ -n "$AGENT_MODE" ]; then echo "$@" >&2; else echo "$@"; fi; }
 CONTAINER="claude-code-user-${NAME}"
 VOLUME="workspace-${NAME}"
 IMAGE="${WORKER_IMAGE:-ghcr.io/abendigo/claude-code-server-worker:latest}"
-STATE_DIR="/var/lib/claude-code-dispatch"
+STATE_DIR="${STATE_DIR:-/var/lib/claude-code-dispatch}"
 
 # $NAME (ttyd-dispatch's SLUG) allows dots, e.g. "mark-oosterveld.org" --
 # fine for container/volume names but not for the VS Code tunnel name: the
@@ -35,7 +44,7 @@ if [ -n "${VR_DEV_USER:-}" ] && [ "$NAME" = "$VR_DEV_USER" ]; then
 fi
 
 if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
-    echo "No environment yet for '${NAME}' -- creating one (this can take a minute on first login)..."
+    say "No environment yet for '${NAME}' -- creating one (this can take a minute on first login)..."
     docker run -d \
         --name "$CONTAINER" \
         --label claude-code.managed=true \
@@ -48,7 +57,7 @@ if ! docker inspect "$CONTAINER" >/dev/null 2>&1; then
         "${EXTRA_ARGS[@]}" \
         "$IMAGE" >/dev/null
 elif [ "$(docker inspect -f '{{.State.Running}}' "$CONTAINER")" != "true" ]; then
-    echo "Resuming environment for '${NAME}'..."
+    say "Resuming environment for '${NAME}'..."
     docker start "$CONTAINER" >/dev/null
 fi
 
@@ -60,7 +69,7 @@ date +%s > "${STATE_DIR}/${NAME}.lastseen"
 # Wait for the worker's own entrypoint to have installed ttyd-session before
 # handing the terminal in -- matters mainly right after a fresh create.
 for _ in $(seq 1 30); do
-    docker exec "$CONTAINER" test -x /usr/local/bin/ttyd-session 2>/dev/null && break
+    docker exec "$CONTAINER" test -x "/usr/local/bin/${READY_CMD}" 2>/dev/null && break
     sleep 1
 done
 
@@ -83,7 +92,11 @@ heartbeat_pid=$!
 trap 'kill "$heartbeat_pid" 2>/dev/null || true' EXIT
 
 set +e
-docker exec -it -u claude -w /workspace -e "TTYD_USER=${NAME}" -e HOME=/workspace "$CONTAINER" /usr/local/bin/ttyd-session
+if [ -n "$AGENT_MODE" ]; then
+    docker exec -i -u claude -w /workspace -e "TTYD_USER=${NAME}" -e HOME=/workspace "$CONTAINER" "/usr/local/bin/${READY_CMD}" "${@:2}"
+else
+    docker exec -it -u claude -w /workspace -e "TTYD_USER=${NAME}" -e HOME=/workspace "$CONTAINER" /usr/local/bin/ttyd-session
+fi
 exit_code=$?
 set -e
 
