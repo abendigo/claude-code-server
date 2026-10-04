@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code VR</title>
+<!-- All URLs are relative: the hub is mounted at /vr/ today and may move to a
+     subdomain later without any change here. -->
+<script type="importmap">
+{ "imports": {
+    "three": "./vendor/three/build/three.module.js",
+    "xterm-headless": "./vendor/xterm-headless.mjs"
+} }
+</script>
+<style>
+  html, body { margin: 0; height: 100%; background: #05070a; color: #cfd8e3;
+    font: 16px ui-sans-serif, system-ui, sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #bar { position: fixed; top: 12px; left: 12px; right: 12px; display: flex; gap: 10px;
+    flex-wrap: wrap; align-items: center; pointer-events: none; }
+  #bar > * { pointer-events: auto; }
+  button { font: inherit; padding: 10px 16px; border-radius: 10px; border: 1px solid #2d3f57;
+    background: #1d2733; color: #e6edf5; cursor: pointer; }
+  button:hover:not(:disabled) { background: #2d3f57; }
+  button:disabled { opacity: .45; cursor: default; }
+  #note { opacity: .75; font-size: 14px; }
+</style>
+</head>
+<body>
+<div id="bar">
+  <button id="enter-vr" disabled>Enter VR</button>
+  <button id="enter-mr" disabled>Enter passthrough</button>
+  <button id="enable-mic" hidden>Enable microphone</button>
+  <span id="note">Loading...</span>
+</div>
+<script type="module" src="./js/main.js"></script>
+</body>
+</html>

@@ -7,6 +7,9 @@ services:
       - WORKER_IMAGE=ghcr.io/abendigo/claude-code-server-worker:latest
       - TUNNEL_NAME=claude-code-server
       - IDLE_TIMEOUT_SECONDS=7200
+      # Optional: this user's worker gets the VR client volume mounted at
+      # /workspace/vr-live (slug form, e.g. mark-oosterveld.org).
+      - VR_DEV_USER=${VR_DEV_USER:-}
     volumes:
       - dispatch-state:/var/lib/claude-code-dispatch
       - /var/run/docker.sock:/var/run/docker.sock
@@ -20,8 +23,40 @@ services:
     networks:
       - traefik_default
 
+  # WebXR front end, served at https://claude.frustrated.blog/vr/. Same host
+  # and same Authelia middleware as the terminal; Traefik strips the /vr
+  # prefix so the hub doesn't know where it's mounted. To move it to its own
+  # subdomain later, change only the router rule (and set TTYD_URL to the
+  # absolute wss:// ttyd address).
+  vr-hub:
+    image: ghcr.io/abendigo/claude-code-server-vr:latest
+    restart: unless-stopped
+    environment:
+      # Speech-to-text: any OpenAI-compatible /audio/transcriptions endpoint.
+      - STT_API_KEY=${STT_API_KEY:-}
+      - STT_URL=${STT_URL:-https://api.openai.com/v1/audio/transcriptions}
+      - STT_MODEL=${STT_MODEL:-whisper-1}
+    volumes:
+      - vr-client:/srv/client
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.claude-vr.rule=Host(`claude.frustrated.blog`) && PathPrefix(`/vr`)"
+      - "traefik.http.routers.claude-vr.entrypoints=websecure"
+      - "traefik.http.routers.claude-vr.tls.certresolver=leresolver"
+      - "traefik.http.routers.claude-vr.middlewares=authelia@docker,claude-vr-slash,claude-vr-strip"
+      - "traefik.http.middlewares.claude-vr-slash.redirectregex.regex=^(https?://[^/]+)/vr$$"
+      - "traefik.http.middlewares.claude-vr-slash.redirectregex.replacement=$${1}/vr/"
+      - "traefik.http.middlewares.claude-vr-strip.stripprefix.prefixes=/vr"
+      - "traefik.http.services.claude-vr.loadbalancer.server.port=8080"
+    networks:
+      - traefik_default
+
 volumes:
   dispatch-state:
+  # Fixed name (no compose-project prefix) because dispatch-to-worker mounts it
+  # into the dev user's worker by name via the host docker socket.
+  vr-client:
+    name: claude-vr-client
 
 networks:
   traefik_default:

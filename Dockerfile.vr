@@ -1,0 +1,26 @@
+FROM node:24-slim
+
+# The VR hub: serves the WebXR client (vr/client) plus a small API (speech to
+# text). It never touches docker.sock or user containers -- terminals reach
+# the gateway's ttyd directly from the browser. Deliberately its own image so
+# that it can restart/redeploy independently of the gateway.
+WORKDIR /app
+COPY vr/package.json vr/package-lock.json ./
+RUN npm ci --omit=dev
+
+COPY vr/server ./server
+# Baked-in default client; copied into the /srv/client volume on first start
+# (see vr/entrypoint.sh). The volume is what's actually served, so the client
+# can be edited live from a worker without rebuilding this image.
+COPY vr/client /app/client-default
+COPY vr/entrypoint.sh /entrypoint.sh
+
+# World-writable so a new named volume inherits permissions that let the
+# (differently-uid'd) dev worker edit files in it. Dev-only volume, mounted
+# into just the one VR_DEV_USER's worker.
+RUN chmod +x /entrypoint.sh && mkdir -p /srv/client && chmod 777 /srv/client
+
+USER node
+ENV NODE_ENV=production PORT=8080
+EXPOSE 8080
+ENTRYPOINT ["/entrypoint.sh"]
