@@ -14,5 +14,9 @@ DST=/workspace/vr-live
 
 find "$DST" -mindepth 1 -delete
 cp -R "$SRC"/. "$DST"/
+# The hub serves this copy only while this stamp is newer than its image's
+# build, so the next deploy automatically takes over again.
+date +%s > "$DST/.synced"
 chmod -R a+rwX "$DST"
 echo "vr-sync: published $(find "$DST" -type f | wc -l) files from $SRC"
+echo "vr-sync: served live until the next vr image build is newer than this sync"

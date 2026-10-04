@@ -12,6 +12,11 @@ import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 8080);
+// Two client sources: the copy baked into the image, and a live-edit overlay
+// volume that vr-sync writes (with a .synced timestamp). Newest wins: a deploy
+// after your last sync serves the image; a sync after the deploy serves the overlay.
+const BAKED_DIR = process.env.BAKED_CLIENT_DIR || '/app/client-default';
+const BUILT_FILE = process.env.BUILT_STAMP_FILE || '/app/client-built';
 const CLIENT_DIR = process.env.CLIENT_DIR || '/srv/client';
 const MODULES_DIR = process.env.MODULES_DIR || path.join(here, '..', 'node_modules');
 
@@ -31,6 +36,27 @@ const STT_PROMPT = process.env.STT_PROMPT
   ?? 'Claude, Claude Code, Anthropic, tmux, git, GitHub, Docker, npm, sudo, ssh, ttyd, Traefik, Authelia, WebXR.';
 const STT_LANGUAGE = process.env.STT_LANGUAGE || 'en';
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
+
+function readStamp(file) {
+  try {
+    const n = Number.parseInt(fs.readFileSync(file, 'utf8').trim(), 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+let lastSource = null;
+function clientDir() {
+  const synced = readStamp(path.join(CLIENT_DIR, '.synced'));
+  const built = readStamp(BUILT_FILE) ?? 0;
+  const source = synced !== null && synced > built ? CLIENT_DIR : BAKED_DIR;
+  if (source !== lastSource) {
+    console.log(`serving client from ${source === CLIENT_DIR ? 'live overlay (vr-sync)' : 'image'}`);
+    lastSource = source;
+  }
+  return source;
+}
 
 // Libraries served from the image's node_modules, mapped by the client's importmap.
 const VENDOR = {
@@ -147,7 +173,7 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    const file = safeJoin(CLIENT_DIR, p === '/' ? '/index.html' : p);
+    const file = safeJoin(clientDir(), p === '/' ? '/index.html' : p);
     return file ? serveFile(res, file) : send(res, 404, 'not found');
   } catch (err) {
     console.error(err);
@@ -155,6 +181,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`vr-hub listening on :${PORT}, client dir ${CLIENT_DIR}`));
+server.listen(PORT, () => console.log(`vr-hub listening on :${PORT}`));
 process.on('SIGTERM', () => server.close(() => process.exit(0)));
 process.on('SIGINT', () => server.close(() => process.exit(0)));
