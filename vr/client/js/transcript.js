@@ -16,7 +16,7 @@ const FIXES = [
 // "claude-code"). Speech can't tell those apart, so they get different words.
 const SYMBOLS = [
   [/\s*\bdouble dash\b\s*/gi, ' --'],
-  [/\s*\bdash dash\b\s*/gi, ' --'],
+  [/\s*\bdash[\s-]+dash\b\s*/gi, ' --'],
   [/\s*\bdash\b\s*/gi, ' -'],
   [/\s*\bhyphen\b\s*/gi, '-'],
   [/\s*\bunderscore\b\s*/gi, '_'],
@@ -40,6 +40,10 @@ export function cleanTranscript(raw, mode = 'prompt') {
   let t = collapseSpelling(raw.trim());
   for (const [re, to] of FIXES) t = t.replace(re, to);
   if (mode === 'command') {
+    // The recogniser punctuates like prose ("Claude, dash, dash, resume.").
+    // Shell commands have no commas, and a period only matters inside a word
+    // (foo.txt), so drop sentence punctuation before reading the spoken symbols.
+    t = t.replace(/[,;]+/g, ' ').replace(/[.!?]+(?=\s|$)/g, '');
     for (const [re, to] of SYMBOLS) t = t.replace(re, to);
     t = t.trim().replace(/ {2,}/g, ' ');
     t = t.toLowerCase().replace(/[.,!?;:\s]+$/, '').replace(/ {2,}/g, ' ');
