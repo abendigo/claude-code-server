@@ -4,7 +4,8 @@
 // add() it below.
 import * as THREE from 'three';
 import { TerminalPanel } from './terminal-panel.js';
-import { quickKeys } from './button-panel.js';
+import { quickKeys, snippetPanel } from './button-panel.js';
+import { KeyboardPanel } from './keyboard-panel.js';
 import { VoicePanel } from './voice-panel.js';
 import { Voice } from './voice.js';
 import { keyToSequence } from './keys.js';
@@ -60,18 +61,26 @@ for (const [i, x, rotY] of [[1, -0.8, 0.3], [2, 0.8, -0.3]]) {
 focus(terminals[0]);
 
 const sendToFocused = (s) => focused?.send(s);
-add(quickKeys(sendToFocused), { pos: [0, 0.95, -0.95], rotX: -0.55 });
 
 const voice = new Voice();
 const voicePanel = new VoicePanel({ voice, getTarget: () => focused, sttEnabled: cfg.sttEnabled });
-add(voicePanel, { pos: [0, 0.55, -0.8], rotX: -0.9 });
+add(voicePanel, { pos: [0, 1.02, -0.9], rotX: -0.3 });
+
+const keyboard = new KeyboardPanel({ onSend: sendToFocused });
+add(keyboard, { pos: [0, 0.62, -0.7], rotX: -0.85 });
+
+add(quickKeys(sendToFocused, { onToggleKeyboard: () => { keyboard.mesh.visible = !keyboard.mesh.visible; } }),
+  { pos: [-0.85, 0.95, -0.85], rotY: 0.5, rotX: -0.35 });
+
+const snippets = await fetch('snippets.json').then((r) => r.json()).catch(() => []);
+if (snippets.length) add(snippetPanel(snippets, sendToFocused), { pos: [0.85, 0.95, -0.85], rotY: -0.5, rotX: -0.35 });
 
 window.__vr = { scene, panels, terminals, focus, voice, renderer }; // for debugging from the console
 
 // ---- pointers (two controllers + the mouse) --------------------------------
 const raycaster = new THREE.Raycaster();
 const tmpM = new THREE.Matrix4();
-const meshes = () => panels.map((p) => p.mesh);
+const meshes = () => panels.filter((p) => p.mesh.visible).map((p) => p.mesh);
 
 function castRay(ray) {
   raycaster.ray.copy(ray);
@@ -140,8 +149,8 @@ function pollButtons(dt) {
     const hand = p.source.handedness;
     const a = edge(4);
     if (hand === 'right') {
-      if (a === true) voicePanel.startRecording();
-      if (a === false) voicePanel.stopRecording();
+      if (a === true) voicePanel.pttDown();
+      if (a === false) voicePanel.pttUp();
       if (edge(5) === true) focused?.send('\r');
     } else if (hand === 'left' && a === true) {
       focus(terminals[(terminals.indexOf(focused) + 1) % terminals.length]);
@@ -231,7 +240,7 @@ async function setupMic() {
   else { btn.hidden = false; btn.onclick = tryInit; }
 }
 
-fetch('api/whoami').then((r) => r.json()).then((w) => { note.textContent = `Signed in as ${w.user}. Grip = move panel (thumbstick resizes), A = talk, B = Enter, X = switch terminal.`; })
+fetch('api/whoami').then((r) => r.json()).then((w) => { note.textContent = `Signed in as ${w.user}. Grip = move panel (thumbstick resizes), A = talk (tap or hold), B = Enter, X = switch terminal.`; })
   .catch(() => { note.textContent = 'Not signed in?'; });
 setupButtons();
 setupMic();

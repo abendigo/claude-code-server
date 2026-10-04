@@ -1,0 +1,14 @@
+[
+  { "label": "claude",     "text": "claude" },
+  { "label": "continue",   "sub": "claude -c", "text": "claude --continue" },
+  { "label": "resume",     "sub": "claude -r", "text": "claude --resume" },
+  { "label": "exit",       "text": "exit" },
+  { "label": "/clear",     "text": "/clear" },
+  { "label": "/compact",   "text": "/compact" },
+  { "label": "/resume",    "text": "/resume" },
+  { "label": "/model",     "text": "/model" },
+  { "label": "status",     "sub": "git", "text": "git status" },
+  { "label": "diff",       "sub": "git", "text": "git diff" },
+  { "label": "log",        "sub": "git", "text": "git log --oneline -10" },
+  { "label": "repo",       "sub": "cd", "text": "cd ~/dev/claude-code-server" }
+]

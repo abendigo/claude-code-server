@@ -76,7 +76,7 @@ export class ButtonPanel extends Panel {
 
 // The keys you actually need when you can't type: answer prompts, move around,
 // and drive tmux copy-mode (the only way to scroll back inside tmux).
-export function quickKeys(onSend) {
+export function quickKeys(onSend, { onToggleKeyboard } = {}) {
   return new ButtonPanel({
     name: 'keys',
     widthM: 1.1,
@@ -105,8 +105,26 @@ export function quickKeys(onSend) {
       { label: 'PgDn', send: '\x1b[6~' },
       { label: '^D', send: '\x04' },
       { label: '^L', sub: 'clear', send: '\x0c' },
-      { label: '^R', send: '\x12' },
+      { label: 'KB', sub: 'keyboard', run: () => onToggleKeyboard?.() },
       { label: 'Esc Esc', sub: 'rewind', send: '\x1b\x1b' },
     ],
+  });
+}
+
+// One-tap commands, loaded from snippets.json so they can be edited (and
+// published with vr-sync) without touching code. Each runs with Enter unless
+// "enter": false, which types the text and leaves it for you to finish.
+export function snippetPanel(snippets, onSend) {
+  return new ButtonPanel({
+    name: 'snippets',
+    widthM: 0.95,
+    cols: 4,
+    colPx: 200,
+    onSend,
+    buttons: snippets.map((s) => ({
+      label: s.label,
+      sub: s.sub,
+      send: s.text + (s.enter === false ? '' : '\r'),
+    })),
   });
 }

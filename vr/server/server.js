@@ -25,6 +25,11 @@ const TTYD_URL = process.env.TTYD_URL || '/ws';
 const STT_URL = process.env.STT_URL || 'https://api.openai.com/v1/audio/transcriptions';
 const STT_KEY = process.env.STT_API_KEY || '';
 const STT_MODEL = process.env.STT_MODEL || 'whisper-1';
+// Vocabulary hint: the recogniser leans toward these spellings, which is what
+// stops "Claude" coming out as "clawed". Override with STT_PROMPT.
+const STT_PROMPT = process.env.STT_PROMPT
+  ?? 'Claude, Claude Code, Anthropic, tmux, git, GitHub, Docker, npm, sudo, ssh, ttyd, Traefik, Authelia, WebXR.';
+const STT_LANGUAGE = process.env.STT_LANGUAGE || 'en';
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
 // Libraries served from the image's node_modules, mapped by the client's importmap.
@@ -96,7 +101,10 @@ async function transcribe(req, res) {
   form.append('file', new Blob([audio], { type: mime }), `speech.${ext}`);
   form.append('model', STT_MODEL);
   form.append('response_format', 'json');
+  if (STT_LANGUAGE) form.append('language', STT_LANGUAGE);
+  if (STT_PROMPT) form.append('prompt', STT_PROMPT);
 
+  const started = performance.now();
   const upstream = await fetch(STT_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${STT_KEY}` },
@@ -108,7 +116,9 @@ async function transcribe(req, res) {
     return sendJson(res, 502, { error: `speech service returned ${upstream.status}` });
   }
   const { text = '' } = await upstream.json();
-  sendJson(res, 200, { text: text.trim() });
+  const ms = Math.round(performance.now() - started);
+  console.log(`stt ${audio.length}B in ${ms}ms via ${STT_MODEL}`);
+  sendJson(res, 200, { text: text.trim(), ms });
 }
 
 const server = http.createServer(async (req, res) => {
