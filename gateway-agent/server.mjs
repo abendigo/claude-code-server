@@ -13,7 +13,7 @@ const PORT = Number(process.env.PORT || 7682);
 const WS_PATH = '/ws';
 const MAX_PER_USER = Number(process.env.AGENT_MAX_PER_USER || 4);
 const KILL_AFTER_MS = 5000;
-const ALLOWED_FROM_CLIENT = new Set(['prompt', 'permission', 'interrupt']);
+const ALLOWED_FROM_CLIENT = new Set(['prompt', 'permission', 'interrupt', 'login_start', 'login_code', 'login_cancel']);
 
 // Same normalisation as scripts/ttyd-dispatch, so a person lands in the same
 // worker whichever front door they use: lowercase, anything outside

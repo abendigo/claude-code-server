@@ -8,17 +8,23 @@
 //     {type:'prompt', text, cwd?, resume?}   send a user message (starts the session on first use)
 //     {type:'permission', id, allow, always?} answer a permission_request
 //     {type:'interrupt'}                      stop the current turn
+//     {type:'login_start'} / {type:'login_code', code} / {type:'login_cancel'}
+//                                             sign in again (see "Sign-in" below)
 //   bridge -> client
 //     {type:'sdk', message}                   a raw SDK message (system/assistant/user/stream_event/result)
 //     {type:'permission_request', id, tool, input, title?, displayName?, description?}
 //     {type:'permission_cancelled', id}
 //     {type:'error', message}
+//     {type:'auth_required'}                  the login has expired: offer to sign in
+//     {type:'login_url', url}                 open this, then send back the code it shows
+//     {type:'login_result', ok, message?}     the sign-in finished
 //     {type:'closed'}
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
+import { spawn } from 'node:child_process';
 
 const HOME = process.env.HOME || '/workspace';
 // Tools that never need asking about. Everything else goes to the user.
@@ -74,6 +80,54 @@ function canUseTool(tool, input, opts) {
   });
 }
 
+// ---- Sign-in ----------------------------------------------------------------
+// When the stored login expires and cannot be refreshed, `claude auth login`
+// is the fix. It prints a URL and then waits for the code the browser shows,
+// so we run it here and pass the URL and code through to the page, instead of
+// someone fishing a wrapped URL out of a terminal. The credentials land in
+// ~/.claude, which every later session reads.
+const LOGIN_ARGV = process.env.AGENT_LOGIN_JSON ? JSON.parse(process.env.AGENT_LOGIN_JSON) : ['claude', 'auth', 'login'];
+const AUTH_ERROR = /oauth|authentication[_ ]failed|invalid[_ ]api[_ ]key|please run \/?login|\b401\b|not logged in/i;
+let login = null;
+
+function startLogin() {
+  cancelLogin();
+  const child = spawn(LOGIN_ARGV[0], LOGIN_ARGV.slice(1), { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, BROWSER: 'true' } });
+  login = child;
+  let sawUrl = false;
+  let tail = '';
+  const onData = (buf) => {
+    tail = (tail + buf).slice(-4000);
+    if (sawUrl) return;
+    const m = tail.match(/https:\/\/\S+/);
+    if (!m) return;
+    sawUrl = true;
+    out({ type: 'login_url', url: m[0] });
+  };
+  child.stdout.on('data', onData);
+  child.stderr.on('data', onData);
+  child.on('error', (e) => { if (login === child) { login = null; out({ type: 'login_result', ok: false, message: `could not run sign-in: ${e.message}` }); } });
+  child.on('exit', (code) => {
+    if (login !== child) return;
+    login = null;
+    const ok = code === 0;
+    out({ type: 'login_result', ok, ...(ok ? {} : { message: tail.trim().split('\n').pop() || `sign-in failed (exit ${code})` }) });
+  });
+}
+
+function cancelLogin() {
+  const child = login;
+  login = null;
+  if (child) child.kill('SIGTERM');
+}
+
+// An expired login shows up as an error on an assistant message or a failed result.
+function looksLikeAuthFailure(m) {
+  if (m?.type === 'assistant' && m.error === 'authentication_failed') return true;
+  if (m?.type === 'result' && m.is_error) return AUTH_ERROR.test(String(m.result ?? ''));
+  return false;
+}
+
 function startSession({ cwd, resume }) {
   session = query({
     prompt: inbox,
@@ -90,11 +144,18 @@ function startSession({ cwd, resume }) {
     },
   });
   (async () => {
+    let authFailed = false;
     try {
-      for await (const message of session) out({ type: 'sdk', message });
+      for await (const message of session) {
+        out({ type: 'sdk', message });
+        if (looksLikeAuthFailure(message)) { authFailed = true; out({ type: 'auth_required' }); }
+      }
     } catch (e) {
       out({ type: 'error', message: e.message });
+      if (AUTH_ERROR.test(e.message)) { authFailed = true; out({ type: 'auth_required' }); }
     }
+    // After an auth failure stay up: this connection is where the sign-in runs.
+    if (authFailed) return;
     out({ type: 'closed' });
     process.exit(0);
   })();
@@ -123,6 +184,11 @@ function handle(msg) {
       }
       break;
     }
+    case 'login_start': startLogin(); break;
+    case 'login_code':
+      if (login && typeof msg.code === 'string' && msg.code.trim()) login.stdin.write(msg.code.trim() + '\n');
+      break;
+    case 'login_cancel': cancelLogin(); break;
     case 'interrupt':
       session?.interrupt().catch((e) => log('interrupt failed', e.message));
       break;
@@ -134,6 +200,6 @@ function handle(msg) {
 readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (!line.trim()) return;
   try { handle(JSON.parse(line)); } catch (e) { out({ type: 'error', message: `bad input: ${e.message}` }); }
-}).on('close', () => { session?.close(); inbox.close(); process.exit(0); });
+}).on('close', () => { cancelLogin(); session?.close(); inbox.close(); process.exit(0); });
 
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { session?.close(); process.exit(0); });
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { cancelLogin(); session?.close(); process.exit(0); });

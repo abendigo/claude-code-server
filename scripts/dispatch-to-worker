@@ -95,7 +95,7 @@ set +e
 if [ -n "$AGENT_MODE" ]; then
     docker exec -i -u claude -w /workspace -e "TTYD_USER=${NAME}" -e HOME=/workspace "$CONTAINER" "/usr/local/bin/${READY_CMD}" "${@:2}"
 else
-    docker exec -it -u claude -w /workspace -e "TTYD_USER=${NAME}" -e HOME=/workspace "$CONTAINER" /usr/local/bin/ttyd-session
+    docker exec -it -u claude -w /workspace -e "TTYD_USER=${NAME}" -e "HUB_URL=${HUB_URL:-}" -e HOME=/workspace "$CONTAINER" /usr/local/bin/ttyd-session
 fi
 exit_code=$?
 set -e

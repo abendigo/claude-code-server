@@ -6,6 +6,8 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - WORKER_IMAGE=ghcr.io/abendigo/claude-code-server-worker:latest
       - TUNNEL_NAME=claude-code-server
+      # Public address of this hub; terminal sessions show a sign-in link under it.
+      - HUB_URL=${HUB_URL:-https://claude.frustrated.blog}
       - IDLE_TIMEOUT_SECONDS=7200
       # Optional: this user's worker gets the VR client volume mounted at
       # /workspace/vr-live (slug form, e.g. mark-oosterveld.org).
@@ -60,6 +62,14 @@ services:
       - "traefik.http.middlewares.claude-vr-slash.redirectregex.replacement=$${1}/vr/"
       - "traefik.http.middlewares.claude-vr-strip.stripprefix.prefixes=/vr"
       - "traefik.http.services.claude-vr.loadbalancer.server.port=8080"
+      # https://claude.frustrated.blog/login: the sign-in page for the terminal
+      # and agent views, which has nothing to do with VR, so it gets a plain URL.
+      - "traefik.http.routers.claude-login.rule=Host(`claude.frustrated.blog`) && Path(`/login`)"
+      - "traefik.http.routers.claude-login.entrypoints=websecure"
+      - "traefik.http.routers.claude-login.tls.certresolver=leresolver"
+      - "traefik.http.routers.claude-login.middlewares=authelia@docker,claude-login-page"
+      - "traefik.http.routers.claude-login.service=claude-vr"
+      - "traefik.http.middlewares.claude-login-page.replacepath.path=/login.html"
     networks:
       - traefik_default
 
