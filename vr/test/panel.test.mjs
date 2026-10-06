@@ -93,7 +93,7 @@ test('Deny and Always allow send the right answers', async () => {
   }
 });
 
-test('cannot send a new message while an approval is pending', async () => {
+test('cannot send a new message while an approval is pending, and says why', async () => {
   const { p, ws } = await make();
   p.submit('first');
   ws.emit(permissionRequest('p1', 'Bash', { command: 'x' }));
@@ -101,6 +101,7 @@ test('cannot send a new message while an approval is pending', async () => {
   p.paste('second');
   p.send('\r');
   assert.equal(ws.sent.length, 0);
+  assert.match(p.convo.blocks.at(-1).text, /Answer the approval first/);
 });
 
 test('conversation renders messages, tool cards and streaming text', async () => {
@@ -187,21 +188,48 @@ test('a sentence containing "yes" during an approval goes to review, not auto-ap
   assert.equal(vp.state, 'review');
 });
 
-test('dictation with no approval pending is sent as a message, in prose (not command) style', async () => {
+test('dictation to a conversation is sent as soon as you stop talking (no Send tap), in prose style', async () => {
   const { p, ws } = await make();
   const vp = voiceFor(p, 'Please run the tests.');
-  vp.direct = true; // skip the review step
+  assert.equal(vp.isDirect(), true); // the default for a conversation
   vp.mode = 'command'; // would lowercase and strip the period for a terminal
   await dictate(vp);
   assert.deepEqual(ws.sent.map((m) => [m.type, m.text]), [['prompt', 'Please run the tests.']]);
 });
 
-test('review then "Send" delivers dictation to the conversation', async () => {
+test('a terminal still defaults to Review, and the two preferences are independent', async () => {
+  const term = { name: 't', paste() {}, send() {} }; // no voiceSubmits: a terminal
+  const vp = new VoicePanel({ voice: { ready: true }, getTarget: () => term, sttEnabled: true });
+  assert.equal(vp.isDirect(), false);
+  vp.toggleDirect();
+  assert.equal(vp.isDirect(), true);
+  assert.equal(vp.directChat, true); // untouched
+  assert.equal(storage['vr.voice.direct'], '1');
+});
+
+test('with "After: Review" chosen, dictation to a conversation waits for Send', async () => {
   const { p, ws } = await make();
   const vp = voiceFor(p, 'Fix the failing test');
-  vp.direct = false;
+  vp.toggleDirect(); // conversation default is Send; this switches it to Review
+  assert.equal(vp.isDirect(), false);
+  assert.equal(storage['vr.voice.directChat'], '0');
   await dictate(vp);
   assert.equal(vp.state, 'review');
   vp.confirm(false);
   assert.deepEqual(ws.sent.map((m) => m.text), ['Fix the failing test']);
+});
+
+test('voice bar has a Tools button that reflects and flips the tool group', async () => {
+  const { p } = await make();
+  const vp = voiceFor(p, 'x');
+  assert.ok(!vp.buttons().some((b) => b.label.startsWith('Tools')), 'no button until a group is attached');
+  let visible = false;
+  vp.toolGroup = { get visible() { return visible; }, toggle() { visible = !visible; } };
+  const btn = () => vp.buttons().find((b) => b.label.startsWith('Tools'));
+  assert.equal(btn().label, 'Tools: Off');
+  btn().act();
+  assert.equal(btn().label, 'Tools: On');
+  const r = btn(); // clicking its centre works through the normal hit-testing
+  vp.onClick({ u: (r.x + r.w / 2) / vp.pxW, v: (r.y + r.h / 2) / vp.pxH });
+  assert.equal(visible, false);
 });

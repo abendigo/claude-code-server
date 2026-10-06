@@ -9,6 +9,8 @@ import { quickKeys, snippetPanel } from './button-panel.js';
 import { KeyboardPanel } from './keyboard-panel.js';
 import { VoicePanel } from './voice-panel.js';
 import { Voice } from './voice.js';
+import { LAYOUT, terminalPlacement } from './layout.js';
+import { ToolGroup } from './tools.js';
 import { LoginFlow, LoginDialog } from './login.js';
 import { keyToSequence } from './keys.js';
 
@@ -60,8 +62,9 @@ function focus(t) {
 const params = new URLSearchParams(location.search);
 const termCount = Number(params.get('terms') ?? 1);
 
+let convo = null;
 if (cfg.agentUrl && params.get('agent') !== '0') {
-  const convo = new ConversationPanel({ agentUrl: cfg.agentUrl, cwd: cfg.agentCwd });
+  convo = new ConversationPanel({ agentUrl: cfg.agentUrl, cwd: cfg.agentCwd, widthM: LAYOUT.conversation.widthM });
   convo.onActivate = focus;
   // An expired Claude login is fixed from the flat page: a link to click and a code to paste.
   const login = new LoginFlow({ send: (m) => convo.client.send(m), onSignedIn: () => convo.client.connect() });
@@ -70,7 +73,7 @@ if (cfg.agentUrl && params.get('agent') !== '0') {
   $('sign-in').onclick = () => login.start();
   window.__vr_login = login;
   focusables.push(convo);
-  add(convo, { pos: [0, 1.6, -1.45] });
+  add(convo, LAYOUT.conversation);
 }
 
 for (let i = 1; i <= termCount; i++) {
@@ -78,9 +81,7 @@ for (let i = 1; i <= termCount; i++) {
   t.onActivate = focus;
   terminals.push(t);
   focusables.push(t);
-  const side = i % 2 ? -1 : 1;
-  const col = Math.ceil(i / 2) - 1;
-  add(t, { pos: [side * (1.65 + col * 1.1), 1.55, -1.0 - col * 0.2], rotY: -side * 0.75 });
+  add(t, terminalPlacement(i));
 }
 focus(focusables[0]);
 
@@ -88,18 +89,26 @@ const sendToFocused = (s) => focused?.send(s);
 
 const voice = new Voice();
 const voicePanel = new VoicePanel({ voice, getTarget: () => focused, sttEnabled: cfg.sttEnabled });
-add(voicePanel, { pos: [0, 1.02, -0.9], rotX: -0.3 });
+add(voicePanel, LAYOUT.voice);
 
 const keyboard = new KeyboardPanel({ onSend: sendToFocused });
-add(keyboard, { pos: [0, 0.62, -0.7], rotX: -0.85 });
+add(keyboard, LAYOUT.keyboard);
 
-add(quickKeys(sendToFocused, { onToggleKeyboard: () => { keyboard.mesh.visible = !keyboard.mesh.visible; } }),
-  { pos: [-0.85, 0.95, -0.85], rotY: 0.5, rotX: -0.35 });
+const keysPanel = add(quickKeys(sendToFocused, { onToggleKeyboard: () => { keyboard.mesh.visible = !keyboard.mesh.visible; } }),
+  LAYOUT.keys);
 
 const snippets = await fetch('snippets.json').then((r) => r.json()).catch(() => []);
-if (snippets.length) add(snippetPanel(snippets, sendToFocused), { pos: [0.85, 0.95, -0.85], rotY: -0.5, rotX: -0.35 });
+const snippetsPanel = snippets.length ? add(snippetPanel(snippets, sendToFocused), LAYOUT.snippets) : null;
 
-window.__vr = { scene, panels, terminals, focusables, focus, voice, renderer }; // for debugging from the console
+// Everything except the conversation and the voice bar lives behind one toggle.
+const tools = new ToolGroup([keyboard, keysPanel, ...(snippetsPanel ? [snippetsPanel] : []), ...terminals], {
+  persist: Boolean(convo),
+  onChange: (visible) => { if (!visible && convo && focused !== convo) focus(convo); },
+});
+voicePanel.toolGroup = tools;
+const visibleFocusables = () => focusables.filter((f) => f.mesh.visible);
+
+window.__vr = { scene, panels, terminals, focusables, focus, voice, renderer, tools }; // for debugging from the console
 
 // ---- pointers (two controllers + the mouse) --------------------------------
 const raycaster = new THREE.Raycaster();
@@ -177,8 +186,11 @@ function pollButtons(dt) {
       if (a === true) voicePanel.pttDown();
       if (a === false) voicePanel.pttUp();
       if (edge(5) === true) focused?.send('\r');
+    } else if (hand === 'left' && edge(5) === true) {
+      tools.toggle();
     } else if (hand === 'left' && a === true) {
-      focus(focusables[(focusables.indexOf(focused) + 1) % focusables.length]);
+      const list = visibleFocusables();
+      focus(list[(list.indexOf(focused) + 1) % list.length]);
     }
     p.prev = gp.buttons.map((b) => b.pressed);
     const stick = gp.axes[3] ?? 0;
@@ -221,6 +233,7 @@ function updateHover() {
 
 // ---- keyboard (flat screen and Bluetooth keyboards in VR) ------------------
 addEventListener('keydown', (e) => {
+  if (e.key === 'F2') { e.preventDefault(); tools.toggle(); return; }
   if (!focused) return;
   const seq = keyToSequence(e);
   if (seq === null) return;
@@ -267,7 +280,7 @@ async function setupMic() {
   else { btn.hidden = false; btn.onclick = tryInit; }
 }
 
-fetch('api/whoami').then((r) => r.json()).then((w) => { note.textContent = `Signed in as ${w.user}. Grip = move panel (thumbstick resizes), thumbstick = scroll, A = talk (tap or hold), B = send, X = switch panel.`; })
+fetch('api/whoami').then((r) => r.json()).then((w) => { note.textContent = `Signed in as ${w.user}. Grip = move panel (thumbstick resizes), thumbstick = scroll, A = talk (tap or hold), B = send, X = switch panel, Y = tools.`; })
   .catch(() => { note.textContent = 'Not signed in?'; });
 setupButtons();
 setupMic();
@@ -284,6 +297,6 @@ renderer.setAnimationLoop((now) => {
   last = now;
   pollButtons(dt);
   updateHover();
-  for (const p of panels) p.update();
+  for (const p of panels) if (p.mesh.visible) p.update(); // hidden panels redraw when shown
   renderer.render(scene, camera);
 });

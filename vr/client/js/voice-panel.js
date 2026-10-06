@@ -2,8 +2,10 @@
 // Recording stops by itself when you stop talking. Two toggles:
 //   Mode  Command | Prompt : shell-friendly text vs prose for Claude (transcript.js)
 //   After Review | Direct  : confirm before sending, or paste straight away
-// Nothing is ever followed by Enter automatically except via "Send + Enter",
-// so a mis-heard word can't run as a command on its own.
+// For a terminal, Review is the default and nothing is ever followed by Enter
+// except via "Send + Enter", so a mis-heard word can't run as a command. For a
+// conversation with Claude the default is to send as soon as you stop talking:
+// approvals still need an explicit answer, and a wrong message can be stopped.
 import { Panel, roundRect, wrapText } from './panel.js';
 import { cleanTranscript, approvalIntent } from './transcript.js';
 
@@ -30,10 +32,12 @@ export class VoicePanel extends Panel {
     this.note = '';
     this.error = sttEnabled ? '' : 'Speech-to-text is not configured on the server (STT_API_KEY).';
     this.mode = load('vr.voice.mode', 'command');
-    this.direct = load('vr.voice.direct', '0') === '1';
+    this.direct = load('vr.voice.direct', '0') === '1'; // terminals
+    this.directChat = load('vr.voice.directChat', '1') === '1'; // conversations
     this.hoverIdx = -1;
     this.pttDownAt = 0;
     this.pttStarted = false;
+    this.toolGroup = null; // set by main.js; adds a Tools button when present
   }
 
   buttons() {
@@ -57,8 +61,12 @@ export class VoicePanel extends Panel {
     const chat = Boolean(this.getTarget()?.voiceSubmits);
     const toggles = [
       { label: chat ? 'Mode: Chat' : `Mode: ${this.mode === 'command' ? 'Command' : 'Prompt'}`, act: () => (chat ? null : this.toggleMode()), x: this.pxW - 640, y: 14, w: 300, h: 64 },
-      { label: `After: ${this.direct ? 'Direct' : 'Review'}`, act: () => this.toggleDirect(), x: this.pxW - 330, y: 14, w: 310, h: 64 },
+      { label: `After: ${this.isDirect() ? 'Send' : 'Review'}`, act: () => this.toggleDirect(), x: this.pxW - 330, y: 14, w: 310, h: 64 },
     ];
+    if (this.toolGroup) {
+      // Keyboard, quick keys, snippets and terminals. Left Y on the controller or F2 do the same.
+      toggles.push({ label: `Tools: ${this.toolGroup.visible ? 'On' : 'Off'}`, act: () => this.toolGroup.toggle(), x: this.pxW - 880, y: 14, w: 220, h: 64 });
+    }
     return [...bottom, ...toggles];
   }
 
@@ -86,9 +94,20 @@ export class VoicePanel extends Panel {
     this.markDirty();
   }
 
+  // Whether finished dictation is delivered without a review step, for the
+  // current target (conversations and terminals remember this separately).
+  isDirect() {
+    return this.getTarget()?.voiceSubmits ? this.directChat : this.direct;
+  }
+
   toggleDirect() {
-    this.direct = !this.direct;
-    save('vr.voice.direct', this.direct ? '1' : '0');
+    if (this.getTarget()?.voiceSubmits) {
+      this.directChat = !this.directChat;
+      save('vr.voice.directChat', this.directChat ? '1' : '0');
+    } else {
+      this.direct = !this.direct;
+      save('vr.voice.direct', this.direct ? '1' : '0');
+    }
     this.markDirty();
   }
 
@@ -149,7 +168,9 @@ export class VoicePanel extends Panel {
       // Talking to Claude is prose; the Command-mode shell clean-up is only for terminals.
       this.text = cleanTranscript(text, target?.voiceSubmits ? 'prompt' : this.mode);
       if (!this.text) { this.state = 'idle'; this.note = "Didn't catch that. " + this.note; }
-      else if (this.direct) { this.deliver(false); this.state = 'idle'; this.note = `Sent "${this.text}" (${this.note})`; }
+      // While an approval is pending a message can't be sent, so anything that wasn't a clear
+      // yes/no waits in the review bar instead of being dropped.
+      else if (this.isDirect() && !target?.pendingPermission) { this.deliver(false); this.state = 'idle'; this.note = `Sent "${this.text}" (${this.note})`; }
       else this.state = 'review';
     } catch (e) {
       this.fail(e.message);
@@ -185,7 +206,7 @@ export class VoicePanel extends Panel {
 
     const target = this.getTarget();
     const header = {
-      idle: 'Tap A or press Talk (hold A = push to talk)',
+      idle: 'Tap A to talk (hold = push to talk)',
       recording: '● Listening... stops when you stop talking',
       transcribing: 'Transcribing...',
       review: `Review, then send to ${target ? target.name : 'no terminal focused'}`,
