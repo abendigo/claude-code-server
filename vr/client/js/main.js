@@ -9,6 +9,7 @@ import { quickKeys, snippetPanel } from './button-panel.js';
 import { KeyboardPanel } from './keyboard-panel.js';
 import { VoicePanel } from './voice-panel.js';
 import { Voice } from './voice.js';
+import { LoginFlow, LoginDialog } from './login.js';
 import { keyToSequence } from './keys.js';
 
 const $ = (id) => document.getElementById(id);
@@ -62,6 +63,12 @@ const termCount = Number(params.get('terms') ?? 1);
 if (cfg.agentUrl && params.get('agent') !== '0') {
   const convo = new ConversationPanel({ agentUrl: cfg.agentUrl, cwd: cfg.agentCwd });
   convo.onActivate = focus;
+  // An expired Claude login is fixed from the flat page: a link to click and a code to paste.
+  const login = new LoginFlow({ send: (m) => convo.client.send(m), onSignedIn: () => convo.client.connect() });
+  new LoginDialog(login);
+  convo.onAuth = (m) => login.handle(m);
+  $('sign-in').onclick = () => login.start();
+  window.__vr_login = login;
   focusables.push(convo);
   add(convo, { pos: [0, 1.6, -1.45] });
 }

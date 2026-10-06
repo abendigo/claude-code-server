@@ -18,6 +18,13 @@ if [ -n "${TUNNEL_NAME:-}" ]; then
   tmux set-option -g status-right-length 100 2>/dev/null
 fi
 
+# If Claude says the login has expired, this page is easier than the wrapped
+# URL that /login prints in a terminal: a link to click and a code to paste.
+SIGNIN_HINT=''
+if [ -n "${HUB_URL:-}" ]; then
+  SIGNIN_HINT="echo 'Claude login expired? Sign in at ${HUB_URL%/}/login'; "
+fi
+
 mapfile -t SESSIONS < <(tmux list-sessions -F '#S' 2>/dev/null)
 
 next_session_name() {
@@ -43,7 +50,7 @@ new_session() {
   # buffer, same as the status-right trick above. Running it as the pane's
   # command means it prints after tmux has already taken over, so it stays
   # in the scrollback for the life of the session.
-  exec tmux new -s "$name" "cat /etc/motd 2>/dev/null; exec bash"
+  exec tmux new -s "$name" "cat /etc/motd 2>/dev/null; ${SIGNIN_HINT}exec bash"
 }
 
 # No existing sessions: nothing to attach to, just start one.

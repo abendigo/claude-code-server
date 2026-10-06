@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in to Claude</title>
+<!-- Served at /login as well as /vr/login.html; keep assets and config.json resolving under /vr/. -->
+<base href="/vr/">
+<style>
+  body { margin: 0; background: #0d141d; color: #e6edf5; font: 15px system-ui, sans-serif; }
+  main { max-width: 460px; margin: 12vh auto; padding: 0 20px; }
+  button { padding: 9px 16px; background: #1e2b3d; color: inherit; border: 1px solid #3a4d68; border-radius: 6px; font: inherit; cursor: pointer; }
+  button:hover { background: #2d3f57; }
+  #login .box { border: 1px solid #3a4d68; }
+</style>
+</head>
+<body>
+<main>
+  <p id="note">Connecting...</p>
+  <button id="again" hidden>Sign in again</button>
+</main>
+<script type="module">
+  // Standalone sign-in page for the terminal: a link to click and a code to paste,
+  // instead of a URL that wraps across the terminal. Signs in the same worker the
+  // terminal sessions run in, so a running Claude picks the new login up by itself.
+  import { LoginFlow, LoginDialog } from './js/login.js';
+  import { AgentClient } from './js/agent-client.js';
+  const note = document.getElementById('note');
+  const again = document.getElementById('again');
+  const flow = new LoginFlow({
+    send: (m) => client.send(m),
+    onSignedIn: () => { note.textContent = 'Signed in. You can close this page and carry on in the terminal.'; },
+  });
+  new LoginDialog(flow);
+  const baseChange = flow.onChange;
+  flow.onChange = (f) => { baseChange(f); again.hidden = f.state !== 'closed'; if (f.state === 'closed' && !note.textContent.startsWith('Signed in')) note.textContent = 'Sign-in closed.'; };
+  // AgentClient wants a conversation; this page only cares about sign-in messages.
+  const client = new AgentClient((await fetch('config.json').then((r) => r.json())).agentUrl, {
+    reset() {}, setState(s) { if (s === 'idle' && flow.state === 'closed') { note.textContent = 'Connected.'; flow.start(); } },
+    handle(m) { if (m.type === 'exit') note.textContent = 'Disconnected. Reload to try again.'; else flow.handle(m); },
+    notice(t) { note.textContent = t; },
+  });
+  again.onclick = () => flow.start();
+  client.connect();
+</script>
+</body>
+</html>
