@@ -24,6 +24,8 @@
   button:hover:not(:disabled) { background: #2d3f57; }
   button:disabled { opacity: .45; cursor: default; }
   #note { opacity: .75; font-size: 14px; }
+  #diag { flex-basis: 100%; opacity: .6; font-size: 13px; }
+  #err { flex-basis: 100%; color: #ff8a8a; font-size: 14px; }
 </style>
 </head>
 <body>
@@ -33,7 +35,15 @@
   <button id="enable-mic" hidden>Enable microphone</button>
   <button id="sign-in">Sign in to Claude</button>
   <span id="note">Loading...</span>
+  <div id="err"></div>
+  <div id="diag"></div>
 </div>
+<script>
+  // A script that fails to load or throws would otherwise leave a blank page; say so here.
+  const showError = (m) => { const e = document.getElementById('err'); if (e) e.textContent += ' ' + m; };
+  addEventListener('error', (e) => showError(e.message || `failed to load ${e.target?.src || e.target?.href || 'a file'}`), true);
+  addEventListener('unhandledrejection', (e) => showError(e.reason?.message || String(e.reason)));
+</script>
 <script type="module" src="./js/main.js"></script>
 </body>
 </html>

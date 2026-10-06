@@ -33,6 +33,15 @@ const AUTO_ALLOW = (process.env.AGENT_AUTO_ALLOW || 'Read,Glob,Grep,TodoWrite').
 // allow rules / auto mode in them can approve tools before we are ever asked.
 const SETTING_SOURCES = (process.env.AGENT_SETTING_SOURCES ?? 'user,project,local').split(',').filter(Boolean);
 
+// The user may be in a headset and hears a short spoken version of each reply
+// (the VR client strips this tag from the text it shows). AGENT_SPOKEN=0 turns it off.
+const SPOKEN_PROMPT = process.env.AGENT_SPOKEN === '0' ? '' : [
+  'The user is often working by voice and hears a short spoken version of your replies.',
+  'At the very end of the final message of each turn, add one or two plain sentences wrapped as <spoken>...</spoken>:',
+  'what you did or found, and any question you need answered. Write it as you would say it out loud:',
+  'no code, file paths, URLs, symbols or markdown inside it, and do not mention the tag itself.',
+].join(' ');
+
 const out = (obj) => process.stdout.write(JSON.stringify(obj) + '\n');
 const log = (...a) => console.error('[agent-bridge]', ...a);
 
@@ -137,7 +146,7 @@ function startSession({ cwd, resume }) {
       includePartialMessages: true,
       // Behave like the terminal: honour the user's CLAUDE.md and settings.
       settingSources: SETTING_SOURCES,
-      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      systemPrompt: { type: 'preset', preset: 'claude_code', ...(SPOKEN_PROMPT ? { append: SPOKEN_PROMPT } : {}) },
       permissionMode: 'default',
       canUseTool,
       stderr: (s) => log(s.trimEnd()),

@@ -233,3 +233,57 @@ test('voice bar has a Tools button that reflects and flips the tool group', asyn
   vp.onClick({ u: (r.x + r.w / 2) / vp.pxW, v: (r.y + r.h / 2) / vp.pxH });
   assert.equal(visible, false);
 });
+
+// ---- spoken replies ----------------------------------------------------------------------
+function fakeSpeaker() {
+  const s = { said: [], stops: 0, speaking: false, available: true, enabled: true, say(t) { this.said.push(t); }, stop() { this.stops++; }, toggle() { this.enabled = !this.enabled; } };
+  return s;
+}
+
+test('Claude\'s summary is spoken when the turn ends, and the Speak button toggles it', async () => {
+  const speaker = fakeSpeaker();
+  const { p, ws } = await make({ speaker });
+  p.submit('hello');
+  ws.emit(init);
+  for (const m of reply('a1', 'Done. <spoken>All finished.</spoken>')) ws.emit(m);
+  ws.emit(result());
+  assert.deepEqual(speaker.said, ['All finished.']);
+  assert.ok(!draw(p).includes('<spoken>'));
+  assert.ok(draw(p).includes('Speak: On'));
+  clickByText(p, 'Speak: On');
+  assert.equal(speaker.enabled, false);
+});
+
+test('sending, answering, stopping and starting over all silence speech; Hush shows while speaking', async () => {
+  const speaker = fakeSpeaker();
+  const { p, ws } = await make({ speaker });
+  p.submit('go');
+  assert.equal(speaker.stops, 1);
+  ws.emit(init);
+  ws.emit(permissionRequest('p1', 'Bash', { command: 'touch x' }));
+  assert.deepEqual(speaker.said, ['Claude wants to run a command. Say yes or no.']);
+  p.answerPermission('allow');
+  assert.equal(speaker.stops, 2);
+  speaker.speaking = true;
+  clickByText(p, 'Hush');
+  assert.equal(speaker.stops, 3);
+  speaker.speaking = false;
+  p.newConversation();
+  assert.equal(speaker.stops, 4);
+});
+
+test('starting to record silences speech', () => {
+  const speaker = fakeSpeaker();
+  const voice = { ready: true, start: () => true, stop() {} };
+  const vp = new VoicePanel({ voice, getTarget: () => null, sttEnabled: true, speaker });
+  vp.startRecording();
+  assert.equal(speaker.stops, 1);
+});
+
+test('with no speech engine the header says so instead of hiding the button', async () => {
+  const speaker = { ...fakeSpeaker(), available: false };
+  const { p } = await make({ speaker });
+  assert.ok(draw(p).includes('Speak: n/a'));
+  clickByText(p, 'Speak: n/a');
+  assert.match(p.convo.blocks.at(-1).text, /no speech engine/);
+});

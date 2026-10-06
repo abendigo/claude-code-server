@@ -44,7 +44,8 @@ function wrap(ctx, text, maxW) {
 }
 
 export class ConversationPanel extends Panel {
-  constructor({ agentUrl, cwd = '', widthM = 1.5 }) {
+  // speaker (optional): says Claude's spoken summaries and approval requests aloud.
+  constructor({ agentUrl, cwd = '', widthM = 1.5, speaker = null }) {
     const pxW = 1400;
     const pxH = 1100;
     super({ widthM, heightM: (widthM * pxH) / pxW, pxW, pxH, name: 'agent' });
@@ -56,7 +57,9 @@ export class ConversationPanel extends Panel {
     this.spots = []; // clickable regions from the last draw
     this.hoverSpot = null;
     this.resumeId = store.get();
+    this.speaker = speaker;
     this.convo = new Conversation({
+      onSpeak: (text) => this.speaker?.say(text),
       onAuth: (msg) => this.onAuth?.(msg),
       onChange: (c) => {
         this.lines = null;
@@ -72,6 +75,7 @@ export class ConversationPanel extends Panel {
   get pendingPermission() { return this.convo.pending; }
 
   answerPermission(kind) {
+    this.speaker?.stop();
     this.client.send(this.convo.answer(kind !== 'deny', kind === 'always'));
   }
 
@@ -96,6 +100,7 @@ export class ConversationPanel extends Panel {
       this.convo.notice('Answer the approval first: Allow or Deny, or say "yes" or "no".', 'error');
       return;
     }
+    this.speaker?.stop();
     const msg = this.convo.submit(t, { cwd: this.cwd, resume: this.resumeId });
     if (this.client.send(msg)) this.resumeId = null; // only the first prompt carries it
     if (text === this.input) this.input = '';
@@ -104,6 +109,7 @@ export class ConversationPanel extends Panel {
   }
 
   newConversation() {
+    this.speaker?.stop();
     this.resumeId = null;
     store.set(null);
     this.client.connect();
@@ -253,7 +259,13 @@ export class ConversationPanel extends Panel {
     hb('▲', () => this.onScroll(8), 70);
     hb('New', () => this.newConversation(), 100);
     if (store.get() && c.state !== 'working') hb('Resume', () => this.resume(), 130);
-    if (c.state === 'working' || waiting) hb('Stop', () => this.client.send({ type: 'interrupt' }), 100);
+    if (c.state === 'working' || waiting) hb('Stop', () => { this.speaker?.stop(); this.client.send({ type: 'interrupt' }); }, 100);
+    if (this.speaker) {
+      // While Claude is talking this is a Hush button; otherwise it switches spoken replies on or off.
+      if (this.speaker.speaking) hb('Hush', () => this.speaker.stop(), 110);
+      else if (this.speaker.available) hb(`Speak: ${this.speaker.enabled ? 'On' : 'Off'}`, () => this.speaker.toggle(), 190);
+      else hb('Speak: n/a', () => this.convo.notice('This browser has no speech engine, so replies cannot be spoken here.', 'error'), 190);
+    }
 
     // conversation
     if (!this.lines) { ctx.font = BODY.font; this.lines = this.buildLines(ctx, w - PAD * 2); }

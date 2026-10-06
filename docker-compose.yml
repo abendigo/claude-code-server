@@ -48,6 +48,12 @@ services:
       - STT_API_KEY=${STT_API_KEY:-}
       - STT_URL=${STT_URL:-https://api.openai.com/v1/audio/transcriptions}
       - STT_MODEL=${STT_MODEL:-whisper-1}
+      # Spoken replies for browsers with no speech engine (the Quest's); defaults to the STT provider and key.
+      - TTS_API_KEY=${TTS_API_KEY:-}
+      - TTS_URL=${TTS_URL:-}
+      - TTS_MODEL=${TTS_MODEL:-tts-1}
+      - TTS_VOICE=${TTS_VOICE:-alloy}
+      - TTS_ENABLED=${TTS_ENABLED:-1}
       # Agent view: working directory Claude starts in (inside the worker).
       - AGENT_CWD=${AGENT_CWD:-/workspace}
     volumes:

@@ -9,6 +9,7 @@ import { quickKeys, snippetPanel } from './button-panel.js';
 import { KeyboardPanel } from './keyboard-panel.js';
 import { VoicePanel } from './voice-panel.js';
 import { Voice } from './voice.js';
+import { Speaker } from './speech.js';
 import { LAYOUT, terminalPlacement } from './layout.js';
 import { ToolGroup } from './tools.js';
 import { LoginFlow, LoginDialog } from './login.js';
@@ -62,9 +63,25 @@ function focus(t) {
 const params = new URLSearchParams(location.search);
 const termCount = Number(params.get('terms') ?? 1);
 
+const voice = new Voice();
+// Spoken replies. Stays quiet while the microphone is open, so it never talks over you.
+const speaker = new Speaker({
+  // The Quest's browser has no speech engine of its own, so the hub makes the audio.
+  remote: cfg.ttsEnabled ? { url: 'api/tts' } : null,
+  onChange: () => convo?.markDirty(),
+  onError: (msg) => convo?.convo.notice(msg, 'error'),
+});
+speaker.hold = () => voice.recording;
+// What this browser offers for speech, shown on the flat page so a silent headset can be diagnosed.
+{
+  const yn = (v) => (v ? 'yes' : 'no');
+  const g = globalThis;
+  document.getElementById('diag').textContent = `Speech: speechSynthesis ${yn(g.speechSynthesis)}, Utterance ${yn(g.SpeechSynthesisUtterance)}, AudioContext ${yn(g.AudioContext || g.webkitAudioContext)}, hub voice ${yn(cfg.ttsEnabled)}`;
+}
+
 let convo = null;
 if (cfg.agentUrl && params.get('agent') !== '0') {
-  convo = new ConversationPanel({ agentUrl: cfg.agentUrl, cwd: cfg.agentCwd, widthM: LAYOUT.conversation.widthM });
+  convo = new ConversationPanel({ agentUrl: cfg.agentUrl, cwd: cfg.agentCwd, widthM: LAYOUT.conversation.widthM, speaker });
   convo.onActivate = focus;
   // An expired Claude login is fixed from the flat page: a link to click and a code to paste.
   const login = new LoginFlow({ send: (m) => convo.client.send(m), onSignedIn: () => convo.client.connect() });
@@ -87,8 +104,7 @@ focus(focusables[0]);
 
 const sendToFocused = (s) => focused?.send(s);
 
-const voice = new Voice();
-const voicePanel = new VoicePanel({ voice, getTarget: () => focused, sttEnabled: cfg.sttEnabled });
+const voicePanel = new VoicePanel({ voice, getTarget: () => focused, sttEnabled: cfg.sttEnabled, speaker });
 add(voicePanel, LAYOUT.voice);
 
 const keyboard = new KeyboardPanel({ onSend: sendToFocused });
@@ -108,7 +124,7 @@ const tools = new ToolGroup([keyboard, keysPanel, ...(snippetsPanel ? [snippetsP
 voicePanel.toolGroup = tools;
 const visibleFocusables = () => focusables.filter((f) => f.mesh.visible);
 
-window.__vr = { scene, panels, terminals, focusables, focus, voice, renderer, tools }; // for debugging from the console
+window.__vr = { scene, panels, terminals, focusables, focus, voice, speaker, renderer, tools }; // for debugging from the console
 
 // ---- pointers (two controllers + the mouse) --------------------------------
 const raycaster = new THREE.Raycaster();
@@ -264,7 +280,7 @@ async function setupButtons() {
     const ok = await navigator.xr.isSessionSupported(mode).catch(() => false);
     const btn = $(id);
     btn.disabled = !ok;
-    btn.onclick = () => enter(mode).catch((e) => { note.textContent = `Could not start: ${e.message}`; });
+    btn.onclick = () => { speaker.unlock(); enter(mode).catch((e) => { note.textContent = `Could not start: ${e.message}`; }); };
   }
 }
 
@@ -273,6 +289,7 @@ async function setupButtons() {
 async function setupMic() {
   const btn = $('enable-mic');
   const tryInit = async () => {
+    speaker.unlock();
     try { await voice.init(); btn.hidden = true; } catch (e) { note.textContent = `Microphone: ${e.message}`; }
   };
   const perm = await navigator.permissions?.query({ name: 'microphone' }).catch(() => null);
