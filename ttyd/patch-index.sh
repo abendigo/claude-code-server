@@ -22,7 +22,7 @@ while (banner.firstChild) document.body.appendChild(banner.firstChild);
 // Menu behaviour: close on an outside click; "Update environment" asks the gateway to
 // move this user's worker onto the newest image (it ends their sessions, so confirm first).
 document.addEventListener('click', (e) => {
-  const menu = document.getElementById('banner-menu');
+  const menu = document.getElementById('banner-menu') as HTMLDetailsElement | null;
   if (menu && menu.open && !menu.contains(e.target as Node)) menu.open = false;
 });
 // The VS Code tunnel is per user (named after them), so ask the gateway who this is.
