@@ -9,7 +9,13 @@
 //   permission  {id, tool, text, status: pending|allowed|denied|cancelled}
 //   notice      {text, level: info|error}
 //
+// Speech: onSpeak(text, kind) is called with what should be said aloud: the
+// reply's <spoken> summary when a turn finishes ('reply'), or a short request
+// when Claude needs an answer ('permission'). See spoken.js.
+//
 // state: offline | connecting | idle | working | waiting (for your approval)
+
+import { splitSpoken, speakable, fallbackSpoken } from './spoken.js';
 
 export function summarizeTool(name, input = {}) {
   const base = (p) => String(p ?? '').split('/').filter(Boolean).pop() ?? '';
@@ -39,6 +45,19 @@ export function describePermission(req) {
   }
 }
 
+// What is said when Claude asks permission. Never reads a raw command aloud.
+export function spokenPermission(req) {
+  const i = req.input ?? {};
+  const lower = (t) => t.charAt(0).toLowerCase() + t.slice(1);
+  let what;
+  switch (req.tool) {
+    case 'Bash': what = i.description ? lower(String(i.description).replace(/[.\s]+$/, '')) : 'run a command'; break;
+    case 'Edit': case 'MultiEdit': case 'Write': what = lower(summarizeTool(req.tool, i)); break;
+    default: what = `use ${req.displayName || req.tool}`;
+  }
+  return speakable(`Claude wants to ${what}. Say yes or no.`, 200);
+}
+
 function toolResultText(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) return content.map((c) => c?.text ?? '').join('\n');
@@ -46,8 +65,9 @@ function toolResultText(content) {
 }
 
 export class Conversation {
-  constructor({ onChange, onAuth } = {}) {
+  constructor({ onChange, onSpeak, onAuth } = {}) {
     this.onChange = onChange ?? (() => {});
+    this.onSpeak = onSpeak ?? (() => {});
     this.onAuth = onAuth ?? (() => {}); // sign-in messages: auth_required, login_url, login_result
     this.reset();
   }
@@ -63,6 +83,8 @@ export class Conversation {
     this.curMsgId = null;
     this.openText = new Map(); // stream index -> block, for the message being streamed
     this.pending = null; // the permission block awaiting an answer
+    this.turnText = ''; // the latest reply text of this turn, and its <spoken> summary, for speaking at the end
+    this.turnSpoken = null;
     this.changed();
   }
 
@@ -77,6 +99,8 @@ export class Conversation {
     const t = text.trim();
     if (!t) return null;
     this.blocks.push({ kind: 'user', text: t });
+    this.turnText = '';
+    this.turnSpoken = null;
     this.state = 'working';
     this.changed();
     return { type: 'prompt', text: t, ...(cwd ? { cwd } : {}), ...(resume ? { resume } : {}) };
@@ -101,6 +125,7 @@ export class Conversation {
         this.blocks.push(block);
         this.pending = block;
         this.state = 'waiting';
+        this.onSpeak(spokenPermission(msg), 'permission');
         break;
       }
       case 'permission_cancelled':
@@ -137,6 +162,10 @@ export class Conversation {
         if (m.is_error || (m.subtype && m.subtype !== 'success')) this.notice(`Stopped: ${m.subtype ?? 'error'}`, 'error');
         this.pending = null;
         this.state = 'idle';
+        if (m.subtype === 'success' && !m.is_error) {
+          const say = speakable(this.turnSpoken ?? '') || fallbackSpoken(this.turnText);
+          if (say) this.onSpeak(say, 'reply');
+        }
         break;
       default: break;
     }
@@ -150,7 +179,8 @@ export class Conversation {
         break;
       case 'content_block_start':
         if (e.content_block?.type === 'text') {
-          const b = { kind: 'assistant', text: e.content_block.text ?? '', streaming: true, msgId: this.curMsgId, final: false };
+          const raw = e.content_block.text ?? '';
+          const b = { kind: 'assistant', raw, text: splitSpoken(raw).text, streaming: true, msgId: this.curMsgId, final: false };
           this.blocks.push(b);
           this.openText.set(e.index, b);
         }
@@ -158,7 +188,7 @@ export class Conversation {
       case 'content_block_delta':
         if (e.delta?.type === 'text_delta') {
           const b = this.openText.get(e.index);
-          if (b) b.text += e.delta.text;
+          if (b) { b.raw += e.delta.text; b.text = splitSpoken(b.raw).text; }
         }
         break;
       case 'content_block_stop': {
@@ -174,8 +204,12 @@ export class Conversation {
     for (const c of message?.content ?? []) {
       if (c.type === 'text' && c.text?.trim()) {
         // The complete text is authoritative; reuse the block we streamed into, if any.
+        const { text, spoken } = splitSpoken(c.text);
+        this.turnText = text;
+        this.turnSpoken = spoken;
         const b = [...this.blocks].reverse().find((x) => x.kind === 'assistant' && x.msgId === message.id && !x.final);
-        if (b) { b.text = c.text; b.final = true; } else this.blocks.push({ kind: 'assistant', text: c.text, streaming: false, msgId: message.id, final: true });
+        if (b && !text) this.blocks.splice(this.blocks.indexOf(b), 1); // the reply was only the spoken tag
+        else if (b) { b.raw = c.text; b.text = text; b.final = true; } else if (text) this.blocks.push({ kind: 'assistant', raw: c.text, text, streaming: false, msgId: message.id, final: true });
       } else if (c.type === 'tool_use') {
         if (!this.blocks.some((x) => x.kind === 'tool' && x.id === c.id)) {
           this.blocks.push({ kind: 'tool', id: c.id, name: c.name, input: c.input, summary: summarizeTool(c.name, c.input), status: 'running', detail: '' });

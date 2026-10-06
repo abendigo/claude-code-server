@@ -21,11 +21,13 @@ function save(key, value) {
 
 export class VoicePanel extends Panel {
   // getTarget(): the currently focused TerminalPanel (or null).
-  constructor({ voice, getTarget, sttEnabled, widthM = 1.1 }) {
+  // speaker (optional): spoken replies; silenced as soon as you start talking.
+  constructor({ voice, getTarget, sttEnabled, widthM = 1.1, speaker = null }) {
     const pxW = 1500;
     const pxH = 520;
     super({ widthM, heightM: (widthM * pxH) / pxW, pxW, pxH, name: 'voice' });
     this.voice = voice;
+    this.speaker = speaker;
     this.getTarget = getTarget;
     this.state = sttEnabled ? 'idle' : 'error';
     this.text = '';
@@ -129,6 +131,7 @@ export class VoicePanel extends Panel {
 
   startRecording() {
     if (!this.voice.ready) { this.fail('Microphone not available. Allow it, then re-enter VR.'); return false; }
+    this.speaker?.stop();
     const ok = this.voice.start((reason) => {
       if (reason === 'silence') this.stopRecording();
       else this.cancel("Didn't hear anything.");

@@ -40,6 +40,16 @@ const STT_PROMPT = process.env.STT_PROMPT
 const STT_LANGUAGE = process.env.STT_LANGUAGE || 'en';
 const MAX_AUDIO_BYTES = 10 * 1024 * 1024;
 
+// Text-to-speech for spoken replies, for browsers (the Quest's) with no speech
+// engine of their own. Any OpenAI-compatible /audio/speech endpoint; by default
+// the same provider and key as speech-to-text. TTS_ENABLED=0 turns it off.
+const TTS_URL = process.env.TTS_URL || STT_URL.replace(/\/audio\/transcriptions$/, '/audio/speech');
+const TTS_KEY = process.env.TTS_API_KEY || STT_KEY;
+const TTS_MODEL = process.env.TTS_MODEL || 'tts-1';
+const TTS_VOICE = process.env.TTS_VOICE || 'alloy';
+const TTS_ENABLED = process.env.TTS_ENABLED !== '0' && Boolean(TTS_KEY);
+const MAX_TTS_CHARS = 600;
+
 function readStamp(file) {
   try {
     const n = Number.parseInt(fs.readFileSync(file, 'utf8').trim(), 10);
@@ -150,6 +160,30 @@ async function transcribe(req, res) {
   sendJson(res, 200, { text: text.trim(), ms });
 }
 
+async function speak(req, res) {
+  if (!TTS_ENABLED) return sendJson(res, 503, { error: 'text-to-speech is not configured on the hub' });
+  let text;
+  try { text = String(JSON.parse((await readBody(req, 16 * 1024)).toString('utf8')).text ?? '').trim(); } catch { text = ''; }
+  if (!text) return sendJson(res, 400, { error: 'no text' });
+  if (text.length > MAX_TTS_CHARS) return sendJson(res, 413, { error: `text longer than ${MAX_TTS_CHARS} characters` });
+
+  const started = performance.now();
+  const upstream = await fetch(TTS_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${TTS_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: TTS_MODEL, voice: TTS_VOICE, input: text, response_format: 'mp3' }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!upstream.ok) {
+    console.error('tts upstream', upstream.status, (await upstream.text()).slice(0, 200));
+    return sendJson(res, 502, { error: `speech service returned ${upstream.status}` });
+  }
+  const audio = Buffer.from(await upstream.arrayBuffer());
+  console.log(`tts ${text.length} chars -> ${audio.length}B in ${Math.round(performance.now() - started)}ms via ${TTS_MODEL}`);
+  res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': audio.length, 'Cache-Control': 'no-store' });
+  res.end(audio);
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://hub');
@@ -162,11 +196,12 @@ const server = http.createServer(async (req, res) => {
       if (!user) return sendJson(res, 401, { error: 'unauthenticated' });
       if (p === '/api/whoami' && req.method === 'GET') return sendJson(res, 200, { user });
       if (p === '/api/stt' && req.method === 'POST') return await transcribe(req, res);
+      if (p === '/api/tts' && req.method === 'POST') return await speak(req, res);
       return sendJson(res, 404, { error: 'not found' });
     }
 
     if (p === '/config.json') {
-      return sendJson(res, 200, { ttydUrl: TTYD_URL, agentUrl: AGENT_URL, agentCwd: AGENT_CWD, sttEnabled: Boolean(STT_KEY) });
+      return sendJson(res, 200, { ttydUrl: TTYD_URL, agentUrl: AGENT_URL, agentCwd: AGENT_CWD, sttEnabled: Boolean(STT_KEY), ttsEnabled: TTS_ENABLED });
     }
 
     for (const [prefix, target] of Object.entries(VENDOR)) {
