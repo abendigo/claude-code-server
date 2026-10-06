@@ -18,6 +18,32 @@ cat >> "$TTYD_HTML/src/index.tsx" <<TSEOF
 const banner = document.createElement('div');
 banner.innerHTML = '${BANNER_HTML}';
 while (banner.firstChild) document.body.appendChild(banner.firstChild);
+
+// Menu behaviour: close on an outside click; "Update environment" asks the gateway to
+// move this user's worker onto the newest image (it ends their sessions, so confirm first).
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('banner-menu') as HTMLDetailsElement | null;
+  if (menu && menu.open && !menu.contains(e.target as Node)) menu.open = false;
+});
+// The VS Code tunnel is per user (named after them), so ask the gateway who this is.
+fetch('/agent/me').then((r) => r.json()).then((me) => {
+  const link = document.getElementById('banner-vscode') as HTMLAnchorElement | null;
+  if (link && me.vscodeUrl) link.href = me.vscodeUrl;
+}).catch(() => {});
+const updateLink = document.getElementById('banner-update');
+if (updateLink) updateLink.addEventListener('click', async (e) => {
+  e.preventDefault();
+  const menu = document.getElementById('banner-menu') as HTMLDetailsElement | null;
+  if (menu) menu.open = false;
+  if (!confirm('Update this environment to the newest image?\\n\\nIf one is available, your terminal and agent sessions end and you log in again.')) return;
+  try {
+    const res = await fetch('/agent/update', { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    alert(body.message || (res.ok ? 'Done.' : 'Update failed (' + res.status + ').'));
+  } catch (err) {
+    alert('Could not reach the gateway: ' + (err as Error).message);
+  }
+});
 TSEOF
 
 # Patch index.scss: append banner styles

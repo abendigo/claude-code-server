@@ -57,6 +57,7 @@ export class ConversationPanel extends Panel {
     this.hoverSpot = null;
     this.resumeId = store.get();
     this.convo = new Conversation({
+      onAuth: (msg) => this.onAuth?.(msg),
       onChange: (c) => {
         this.lines = null;
         if (c.sessionId) store.set(c.sessionId);

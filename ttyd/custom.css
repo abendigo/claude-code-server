@@ -15,6 +15,42 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    gap: 12px;
+}
+
+#banner-menu { position: relative; }
+
+#banner-menu summary {
+    list-style: none;
+    cursor: pointer;
+    line-height: 20px;
+}
+
+#banner-menu summary::-webkit-details-marker { display: none; }
+
+.banner-items {
+    position: absolute;
+    top: 30px;
+    right: 0;
+    min-width: 190px;
+    display: flex;
+    flex-direction: column;
+    background: #1e1e2e;
+    border: 1px solid #313244;
+    border-radius: 4px;
+    padding: 4px 0;
+}
+
+.banner-items a {
+    color: #a6adc8;
+    text-decoration: none;
+    padding: 0 14px;
+    white-space: nowrap;
+}
+
+.banner-items a:hover {
+    color: #cdd6f4;
+    background: #313244;
 }
 
 .banner-btn {
@@ -26,7 +62,7 @@
     padding: 2px 10px;
     border-radius: 4px;
     background: #1e1e2e;
-    margin-left: 8px;
+    margin-left: 0;
 }
 
 .banner-btn:hover {

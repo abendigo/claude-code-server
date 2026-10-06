@@ -46,8 +46,9 @@ function toolResultText(content) {
 }
 
 export class Conversation {
-  constructor({ onChange } = {}) {
+  constructor({ onChange, onAuth } = {}) {
     this.onChange = onChange ?? (() => {});
+    this.onAuth = onAuth ?? (() => {}); // sign-in messages: auth_required, login_url, login_result
     this.reset();
   }
 
@@ -106,6 +107,11 @@ export class Conversation {
         for (const b of this.blocks) if (b.kind === 'permission' && b.id === msg.id) b.status = 'cancelled';
         if (this.pending?.id === msg.id) { this.pending = null; this.state = 'working'; }
         break;
+      case 'auth_required':
+        this.notice('Your Claude sign-in has expired. Use the page outside VR to sign in again.', 'error');
+        this.onAuth(msg);
+        break;
+      case 'login_url': case 'login_result': this.onAuth(msg); break;
       case 'status': this.status = msg.text; break;
       case 'error': this.notice(msg.message, 'error'); break;
       case 'exit': case 'closed':

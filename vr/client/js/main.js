@@ -11,6 +11,7 @@ import { VoicePanel } from './voice-panel.js';
 import { Voice } from './voice.js';
 import { LAYOUT, terminalPlacement } from './layout.js';
 import { ToolGroup } from './tools.js';
+import { LoginFlow, LoginDialog } from './login.js';
 import { keyToSequence } from './keys.js';
 
 const $ = (id) => document.getElementById(id);
@@ -65,6 +66,12 @@ let convo = null;
 if (cfg.agentUrl && params.get('agent') !== '0') {
   convo = new ConversationPanel({ agentUrl: cfg.agentUrl, cwd: cfg.agentCwd, widthM: LAYOUT.conversation.widthM });
   convo.onActivate = focus;
+  // An expired Claude login is fixed from the flat page: a link to click and a code to paste.
+  const login = new LoginFlow({ send: (m) => convo.client.send(m), onSignedIn: () => convo.client.connect() });
+  new LoginDialog(login);
+  convo.onAuth = (m) => login.handle(m);
+  $('sign-in').onclick = () => login.start();
+  window.__vr_login = login;
   focusables.push(convo);
   add(convo, LAYOUT.conversation);
 }
