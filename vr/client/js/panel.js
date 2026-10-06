@@ -30,6 +30,12 @@ export class Panel {
 
   markDirty() { this.dirty = true; }
 
+  // Visible on screen: this mesh and everything above it (a title bar is a child of its window).
+  get shown() {
+    for (let o = this.mesh; o; o = o.parent) if (!o.visible) return false;
+    return true;
+  }
+
   setFocused(f) {
     if (this.focused === f) return;
     this.focused = f;

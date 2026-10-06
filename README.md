@@ -72,6 +72,19 @@ Environment (Portainer, set once): `STT_API_KEY` (speech-to-text key), optionall
 
 The VR page's main panel is a conversation with Claude Code rather than a terminal: your messages, Claude's streaming replies, one-line tool cards, and Allow / Always allow / Deny buttons when Claude asks permission (or just say "yes" / "no" / "always allow"). Terminals remain available (`?terms=N`, or `?agent=0` to hide the conversation).
 
+### Windows
+
+Everything in the VR scene (the conversation, voice bar, keyboard, quick keys, snippets, terminals) is a window managed by `vr/client/js/windows.js`. Each has a title bar: press its body with the trigger (or the mouse) and drag to move the window, which turns to face you as it goes; the thumbstick resizes while you drag. A grip-grab on the panel itself still works. The **home** button puts that window back where it started, and **close** hides it (not offered for the conversation or voice bar; the Tools toggle brings the others back). Left thumbstick press (F3 on a keyboard) resets every window. Where you leave a window is remembered per window in the browser (`vr.win.<id>`). New kinds of window are a `Panel` subclass passed to `windows.add(panel, { id, title, placement })`.
+
+**Document windows.** The page polls `windows.json` (served next to `index.html`, every 3 s) and shows each entry as a scrollable, read-only markdown window to the right of the conversation:
+
+```json
+{ "windows": [ { "id": "handoff", "title": "Handoff", "path": "docs/handoff.md" },
+               { "id": "note", "title": "Note", "markdown": "# Hello" } ] }
+```
+
+`path` is relative to the same folder (no `..`, no absolute paths or URLs); `markdown` is inline. A new id opens a window, changed content updates it (and brings back one you closed), and an id that leaves the file closes it. A missing file means no windows. With the live-edit loop, whoever can write `/workspace/vr-live/windows.json` (Claude, from the worker) can put a document in front of you; a later bridge tool can drive the same open/update/close calls. The renderer (`markdown.js`, `markdown-panel.js`) handles headings, paragraphs, lists, code, quotes, rules and tables, and flattens inline markup to plain text.
+
 ```
 Quest page --wss /agent/ws--> gateway (agent-gateway, :7682) --docker exec -i--> agent-bridge (in your worker) --> Claude Agent SDK
 ```
