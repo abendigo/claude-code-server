@@ -50,9 +50,63 @@ function spawnArgv(slug) {
 }
 
 const active = new Map(); // slug -> count
+const updating = new Set(); // slugs with an update in flight
+
+// `recycle-worker NAME` (no --force) pulls the image and only restarts the user's
+// worker if it is behind. It prints one line saying which, then (if restarting)
+// stops the container a few seconds later, so we answer on that first line.
+function recycleArgv(slug) {
+  if (process.env.RECYCLE_ARGV_JSON) return [...JSON.parse(process.env.RECYCLE_ARGV_JSON), slug];
+  return ['recycle-worker', slug];
+}
+
+function updateWorker(slug) {
+  return new Promise((resolve) => {
+    const argv = recycleArgv(slug);
+    const child = spawn(argv[0], argv.slice(1), { stdio: ['ignore', 'pipe', 'pipe'] });
+    let done = false;
+    const finish = (status, message) => { if (!done) { done = true; clearTimeout(timer); resolve({ status, message }); } };
+    const timer = setTimeout(() => finish('error', 'The update is taking too long to start. Try again in a minute.'), 120_000);
+    readline.createInterface({ input: child.stdout }).on('line', (line) => {
+      if (!line.trim() || line.startsWith('recycle-worker:')) return;
+      if (/^already up to date/i.test(line)) finish('current', line);
+      else if (/^could not/i.test(line)) finish('error', line);
+      else finish('updating', line);
+    });
+    child.on('error', (e) => finish('error', `could not run the update: ${e.message}`));
+    child.on('exit', (code) => finish('error', code === 10 ? 'Already up to date.' : `The update did not start (exit ${code}).`));
+  }).finally(() => updating.delete(slug));
+}
+
+// Same name dispatch-to-worker gives the user's VS Code tunnel (dots and other
+// characters the tunnel name rejects become '-'; 50 characters max).
+export function tunnelName(slug, base = process.env.TUNNEL_NAME || 'claude-code-server') {
+  return `${base}-${slug.replace(/[^A-Za-z0-9_=-]/g, '-')}`.slice(0, 50);
+}
+
+function handleMe(req, res) {
+  const slug = slugify(req.headers['remote-user']);
+  res.writeHead(slug ? 200 : 401, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(slug ? { user: slug, vscodeUrl: `https://vscode.dev/tunnel/${tunnelName(slug)}` } : { message: 'Not signed in' }));
+}
+
+async function handleUpdate(req, res) {
+  const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  if (req.method !== 'POST') return json(405, { message: 'POST only' });
+  // A cross-site page could otherwise make a logged-in browser restart the user's environment.
+  if (!originAllowed(req) || !req.headers.origin) return json(403, { message: 'Forbidden' });
+  const slug = slugify(req.headers['remote-user']);
+  if (!slug) return json(401, { message: 'Not signed in' });
+  if (updating.has(slug)) return json(409, { message: 'An update is already in progress.' });
+  updating.add(slug);
+  const result = await updateWorker(slug);
+  json(result.status === 'error' ? 502 : 200, result);
+}
 
 const server = http.createServer((req, res) => {
   if (req.url === '/healthz') { res.writeHead(200); res.end('ok'); return; }
+  if (req.url === '/me') return handleMe(req, res);
+  if (req.url === '/update') { handleUpdate(req, res).catch(() => { if (!res.headersSent) { res.writeHead(500); res.end(); } }); return; }
   res.writeHead(404); res.end('not found');
 });
 
