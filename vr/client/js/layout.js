@@ -7,10 +7,16 @@
 export const LAYOUT = {
   conversation: { widthM: 1.3, pos: [0, 1.62, -1.45], rotX: 0, rotY: 0 },
   voice: { pos: [0, 0.86, -0.9], rotX: -0.3, rotY: 0 },
-  keyboard: { pos: [0, 0.5, -0.7], rotX: -0.9, rotY: 0 },
+  keyboard: { pos: [0, 0.4, -0.7], rotX: -0.9, rotY: 0 },
   keys: { pos: [-1.25, 0.85, -0.85], rotX: -0.35, rotY: 0.5 },
   snippets: { pos: [1.25, 0.85, -0.85], rotX: -0.35, rotY: -0.5 },
 };
+
+// i-th opened document window (0-based): to the right of the conversation, each one
+// cascaded a little down and back so the title bars stay in view; drag them anywhere.
+export function documentPlacement(i) {
+  return { pos: [1.75 + i * 0.12, 1.5 - i * 0.1, -1.1 - i * 0.12], rotX: 0, rotY: -0.6 };
+}
 
 // i-th terminal (1-based): alternating left/right of the conversation, turned toward the viewer.
 export function terminalPlacement(i) {

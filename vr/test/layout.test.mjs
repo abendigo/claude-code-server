@@ -30,10 +30,13 @@ const { init, permissionRequest } = await import('./fixtures.mjs');
 await new Promise((r) => setTimeout(r, 5));
 
 // ---- build the scene exactly as main.js does ----------------------------------------
-const place = (panel, { pos, rotX = 0, rotY = 0 }) => {
-  panel.mesh.position.set(...pos);
-  panel.mesh.rotation.set(rotX, rotY, 0, 'YXZ');
-  panel.mesh.updateMatrixWorld(true);
+// Every panel is a window with a title bar above it, and the bars are obstacles too.
+const { WindowManager } = await import('../client/js/windows.js');
+const scene = new THREE.Scene();
+const windows = new WindowManager({ scene, store: null });
+const place = (panel, placement) => {
+  windows.add(panel, { id: panel.name, title: panel.name, placement });
+  scene.updateMatrixWorld(true);
   return panel;
 };
 
@@ -46,7 +49,7 @@ const snippets = place(snippetPanel([...Array(12)].map((_, i) => ({ label: `s${i
 // TerminalPanel imports xterm through the browser's import map, which Node can't
 // resolve, so use a stand-in with its real size (1.3 m wide, 100x30 cells ~ 0.67 aspect).
 const terminal = place(new Panel({ widthM: 1.3, heightM: 1.3 * 0.67, pxW: 1628, pxH: 1088, name: 'term 1' }), terminalPlacement(1));
-const panels = [convo, voice, keyboard, keys, snippets, terminal];
+const panels = windows.panels; // each window and its title bar
 
 // ---- controls per panel (centres in canvas space, u/v in 0..1, v down) ----------------------
 const centre = (r, p) => ({ u: (r.x + r.w / 2) / p.pxW, v: (r.y + r.h / 2) / p.pxH });
@@ -90,6 +93,13 @@ const controls = new Map([
   [snippets, gridControls(snippets, 'snippet')],
   [terminal, [{ name: 'terminal centre', u: 0.5, v: 0.5 }, { name: 'terminal title', u: 0.5, v: 0.02 }]],
 ]);
+// Each title bar: its drag area and its buttons must be reachable too.
+for (const w of windows.windows) {
+  const bar = w.bar;
+  const list = [{ name: `${w.title} drag area`, u: 0.15, v: 0.5 }];
+  for (const z of bar.zones()) list.push({ name: `${w.title} ${z.id} button`, u: (z.x0 + z.x1) / 2 / bar.pxW, v: 0.5 });
+  controls.set(bar, list);
+}
 
 const EYES = [];
 for (const y of [1.1, 1.4, 1.7]) for (const x of [-0.3, 0, 0.3]) EYES.push(new THREE.Vector3(x, y, 0));
