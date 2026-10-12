@@ -45,7 +45,7 @@ function wrap(ctx, text, maxW) {
 
 export class ConversationPanel extends Panel {
   // speaker (optional): says Claude's spoken summaries and approval requests aloud.
-  constructor({ agentUrl, cwd = '', widthM = 1.5, speaker = null }) {
+  constructor({ agentUrl, cwd = '', widthM = 1.5, speaker = null, showTools = true }) {
     const pxW = 1400;
     const pxH = 1100;
     super({ widthM, heightM: (widthM * pxH) / pxW, pxW, pxH, name: 'agent' });
@@ -58,6 +58,8 @@ export class ConversationPanel extends Panel {
     this.hoverSpot = null;
     this.resumeId = store.get();
     this.speaker = speaker;
+    this.showTools = showTools; // tool cards in this view; the Activity window shows them otherwise
+    this.listeners = new Set(); // called with the conversation whenever it changes (the Activity window)
     this.convo = new Conversation({
       onSpeak: (text) => this.speaker?.say(text),
       onAuth: (msg) => this.onAuth?.(msg),
@@ -65,6 +67,7 @@ export class ConversationPanel extends Panel {
         this.lines = null;
         if (c.sessionId) store.set(c.sessionId);
         this.markDirty();
+        for (const f of this.listeners) f(c);
       },
     });
     this.client = new AgentClient(agentUrl, this.convo);
@@ -177,6 +180,7 @@ export class ConversationPanel extends Panel {
         }
         if (b.streaming && out.length) out[out.length - 1].cursor = true;
       } else if (b.kind === 'tool') {
+        if (!this.showTools) continue; // shown in the Activity window instead
         const color = { running: '#e5c07b', ok: '#98c379', error: '#ff8a8a' }[b.status];
         ctx.font = CODE.font;
         const [first] = wrap(ctx, b.summary, width - 70);

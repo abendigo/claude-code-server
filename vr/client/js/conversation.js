@@ -5,7 +5,7 @@
 // Block kinds:
 //   user        {text}
 //   assistant   {text, streaming}
-//   tool        {id, name, summary, status: running|ok|error, detail}
+//   tool        {id, name, summary, status: running|ok|error, detail, started, ended}
 //   permission  {id, tool, text, status: pending|allowed|denied|cancelled}
 //   notice      {text, level: info|error}
 //
@@ -65,7 +65,8 @@ function toolResultText(content) {
 }
 
 export class Conversation {
-  constructor({ onChange, onSpeak, onAuth } = {}) {
+  constructor({ onChange, onSpeak, onAuth, now } = {}) {
+    this.now = now ?? Date.now; // injectable, so durations can be tested
     this.onChange = onChange ?? (() => {});
     this.onSpeak = onSpeak ?? (() => {});
     this.onAuth = onAuth ?? (() => {}); // sign-in messages: auth_required, login_url, login_result
@@ -80,6 +81,8 @@ export class Conversation {
     this.model = null;
     this.cwd = null;
     this.last = null; // {ms, cost} of the last finished turn
+    this.turnStarted = null; // when you sent the current (or last) prompt, and when its turn ended
+    this.turnEnded = null;
     this.curMsgId = null;
     this.openText = new Map(); // stream index -> block, for the message being streamed
     this.pending = null; // the permission block awaiting an answer
@@ -98,7 +101,9 @@ export class Conversation {
   submit(text, { cwd, resume } = {}) {
     const t = text.trim();
     if (!t) return null;
-    this.blocks.push({ kind: 'user', text: t });
+    this.blocks.push({ kind: 'user', text: t, at: this.now() });
+    this.turnStarted = this.now();
+    this.turnEnded = null;
     this.turnText = '';
     this.turnSpoken = null;
     this.state = 'working';
@@ -159,6 +164,7 @@ export class Conversation {
       case 'user': this.handleUser(m.message); break;
       case 'result':
         this.last = { ms: m.duration_ms ?? null, cost: m.total_cost_usd ?? null };
+        this.turnEnded = this.now();
         if (m.is_error || (m.subtype && m.subtype !== 'success')) this.notice(`Stopped: ${m.subtype ?? 'error'}`, 'error');
         this.pending = null;
         this.state = 'idle';
@@ -212,7 +218,7 @@ export class Conversation {
         else if (b) { b.raw = c.text; b.text = text; b.final = true; } else if (text) this.blocks.push({ kind: 'assistant', raw: c.text, text, streaming: false, msgId: message.id, final: true });
       } else if (c.type === 'tool_use') {
         if (!this.blocks.some((x) => x.kind === 'tool' && x.id === c.id)) {
-          this.blocks.push({ kind: 'tool', id: c.id, name: c.name, input: c.input, summary: summarizeTool(c.name, c.input), status: 'running', detail: '' });
+          this.blocks.push({ kind: 'tool', id: c.id, name: c.name, input: c.input, summary: summarizeTool(c.name, c.input), status: 'running', detail: '', started: this.now(), ended: null });
         }
       }
       // thinking blocks are not shown
@@ -224,7 +230,7 @@ export class Conversation {
     for (const c of message.content) {
       if (c.type !== 'tool_result') continue;
       const b = this.blocks.find((x) => x.kind === 'tool' && x.id === c.tool_use_id);
-      if (b) { b.status = c.is_error ? 'error' : 'ok'; b.detail = toolResultText(c.content).slice(0, 2000); }
+      if (b) { b.status = c.is_error ? 'error' : 'ok'; b.detail = toolResultText(c.content).slice(0, 2000); b.ended = this.now(); }
     }
   }
 }

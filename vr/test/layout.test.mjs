@@ -25,6 +25,7 @@ const { ConversationPanel } = await import('../client/js/conversation-panel.js')
 const { VoicePanel } = await import('../client/js/voice-panel.js');
 const { KeyboardPanel } = await import('../client/js/keyboard-panel.js');
 const { Panel } = await import('../client/js/panel.js');
+const { ActivityPanel } = await import('../client/js/activity-panel.js');
 const { quickKeys, snippetPanel } = await import('../client/js/button-panel.js');
 const { init, permissionRequest } = await import('./fixtures.mjs');
 await new Promise((r) => setTimeout(r, 5));
@@ -46,6 +47,7 @@ const voice = place(new VoicePanel({ voice: { ready: true }, getTarget: () => co
 const keyboard = place(new KeyboardPanel({ onSend() {} }), LAYOUT.keyboard);
 const keys = place(quickKeys(() => {}, {}), LAYOUT.keys);
 const snippets = place(snippetPanel([...Array(12)].map((_, i) => ({ label: `s${i}`, text: 'x' })), () => {}), LAYOUT.snippets);
+const activity = place(new ActivityPanel({ getConversation: () => convo.convo, widthM: LAYOUT.activity.widthM }), LAYOUT.activity);
 // TerminalPanel imports xterm through the browser's import map, which Node can't
 // resolve, so use a stand-in with its real size (1.3 m wide, 100x30 cells ~ 0.67 aspect).
 const terminal = place(new Panel({ widthM: 1.3, heightM: 1.3 * 0.67, pxW: 1628, pxH: 1088, name: 'term 1' }), terminalPlacement(1));
@@ -91,6 +93,7 @@ const controls = new Map([
   [keyboard, keyboardControls()],
   [keys, gridControls(keys, 'keys')],
   [snippets, gridControls(snippets, 'snippet')],
+  [activity, [{ name: 'activity centre', u: 0.5, v: 0.5 }, { name: 'activity status', u: 0.5, v: 0.05 }, { name: 'activity newest row', u: 0.5, v: 0.95 }]],
   [terminal, [{ name: 'terminal centre', u: 0.5, v: 0.5 }, { name: 'terminal title', u: 0.5, v: 0.02 }]],
 ]);
 // Each title bar: its drag area and its buttons must be reachable too.

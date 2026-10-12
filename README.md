@@ -76,7 +76,7 @@ The VR page's main panel is a conversation with Claude Code rather than a termin
 
 Everything in the VR scene (the conversation, voice bar, keyboard, quick keys, snippets, terminals) is a window managed by `vr/client/js/windows.js`. Each has a title bar: press its body with the trigger (or the mouse) and drag to move the window, which turns to face you as it goes; the thumbstick resizes while you drag. A grip-grab on the panel itself still works. The **home** button puts that window back where it started, and **close** hides it (not offered for the conversation or voice bar; the Tools toggle brings the others back). Left thumbstick press (F3 on a keyboard) resets every window. Where you leave a window is remembered per window in the browser (`vr.win.<id>`). New kinds of window are a `Panel` subclass passed to `windows.add(panel, { id, title, placement })`.
 
-**Document windows.** The page polls `windows.json` (served next to `index.html`, every 3 s) and shows each entry as a scrollable, read-only markdown window to the right of the conversation:
+**Document windows.** The page polls `windows.json` (served next to `index.html`, every 3 s) and shows each entry as a scrollable, read-only markdown window to the left of the conversation:
 
 ```json
 { "windows": [ { "id": "handoff", "title": "Handoff", "path": "docs/handoff.md" },
@@ -84,6 +84,8 @@ Everything in the VR scene (the conversation, voice bar, keyboard, quick keys, s
 ```
 
 `path` is relative to the same folder (no `..`, no absolute paths or URLs); `markdown` is inline. A new id opens a window, changed content updates it (and brings back one you closed), and an id that leaves the file closes it. A missing file means no windows. With the live-edit loop, whoever can write `/workspace/vr-live/windows.json` (Claude, from the worker) can put a document in front of you; a later bridge tool can drive the same open/update/close calls. The renderer (`markdown.js`, `markdown-panel.js`) handles headings, paragraphs, lists, code, quotes, rules and tables, and flattens inline markup to plain text.
+
+**Activity window.** To the right of the conversation, a glanceable view of what Claude is doing: a status line with a moving spinner and a running timer ("Working 42s", with the tool in progress, or "Needs your answer"), then one short row per tool call, newest at the bottom, with a tick, cross or spinner and a duration. It shows no output or file contents. It reads the same conversation model as the main panel (`activity.js` holds the logic, `activity-panel.js` draws it), so it needs no bridge change. Tool cards no longer appear in the main conversation; add `?tools=1` to the page URL to bring them back there too. Like every window it can be dragged or sent home. Closing it hides it until the page is reloaded (the reset shortcut moves windows but does not reopen closed ones).
 
 ```
 Quest page --wss /agent/ws--> gateway (agent-gateway, :7682) --docker exec -i--> agent-bridge (in your worker) --> Claude Agent SDK
