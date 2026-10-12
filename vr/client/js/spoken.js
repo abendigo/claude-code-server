@@ -1,5 +1,5 @@
 // What gets said out loud. Pure text handling (no DOM, no speech engine), so it
-// can be tested. Claude is asked (agent/bridge.mjs) to end each reply with a
+// can be tested. Claude is asked (agent/service.mjs) to end each reply with a
 // short <spoken>...</spoken> summary; that tag is stripped from what is shown
 // and is what gets spoken. If a reply has no tag, the first couple of
 // sentences are spoken instead.

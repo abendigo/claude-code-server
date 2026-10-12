@@ -12,12 +12,14 @@ const scripts = path.join(here, '..');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A scratch "gateway": fake docker on PATH, recycle-worker where the watcher expects it.
-function setup(containers, { latest = 'sha256:new', current = 'sha256:old', pullFail = false } = {}) {
+function setup(containers, { latest = 'sha256:new', current = 'sha256:old', pullFail = false, busy = false } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'recycle-'));
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
   fs.copyFileSync(path.join(here, 'fake-docker'), path.join(bin, 'docker'));
   fs.chmodSync(path.join(bin, 'docker'), 0o755);
+  // `agent-service busy` inside the worker: exits 0 while Claude is working or waiting.
+  fs.writeFileSync(path.join(bin, 'agent-service'), '#!/bin/bash\n[ "$1" = busy ] && [ -n "${FAKE_BUSY:-}" ] && exit 0\nexit 1\n', { mode: 0o755 });
   // The watcher calls /usr/local/bin/recycle-worker; point that at the repo copy via a wrapper env.
   const wrapper = path.join(bin, 'recycle-worker');
   fs.writeFileSync(wrapper, `#!/bin/bash\nexec bash ${path.join(scripts, 'recycle-worker')} "$@"\n`, { mode: 0o755 });
@@ -29,6 +31,7 @@ function setup(containers, { latest = 'sha256:new', current = 'sha256:old', pull
     ...process.env, PATH: `${bin}:${process.env.PATH}`, FAKE_LOG: path.join(dir, 'docker.log'), FAKE_ROOT: root,
     FAKE_CONTAINERS: containers.join(' '), FAKE_LATEST: latest, FAKE_CURRENT: current, RECYCLE_NOTICE_SECONDS: '0',
     ...(pullFail ? { FAKE_PULL_FAIL: '1' } : {}),
+    ...(busy ? { FAKE_BUSY: '1' } : {}),
   };
   fs.writeFileSync(env.FAKE_LOG, '');
   const log = () => fs.readFileSync(env.FAKE_LOG, 'utf8');
@@ -126,4 +129,46 @@ test('bad arguments are rejected', () => {
   assert.equal(r.status, 2);
   const r2 = spawnSync('bash', [path.join(scripts, 'recycle-worker')], { encoding: 'utf8' });
   assert.equal(r2.status, 1);
+});
+
+test('busy: Claude is working in the worker, so a plain update leaves it alone and says why', async () => {
+  const c = 'claude-code-user-mark';
+  const s = setup([c], { busy: true });
+  const asked = s.askFromWorker(c);
+  await sleep(700);
+  s.runWatcher();
+  const r = await asked;
+  assert.match(r.out, /Not restarting: Claude is working/);
+  assert.match(r.out, /update-worker --force/);
+  assert.ok(!s.log().includes('docker stop') && !s.log().includes('docker rm'), s.log());
+});
+
+test('busy but --force: restarted anyway', async () => {
+  const c = 'claude-code-user-mark';
+  const s = setup([c], { busy: true });
+  const asked = s.askFromWorker(c, ['--force']);
+  await sleep(700);
+  s.runWatcher();
+  const r = await asked;
+  assert.match(r.out, /forced/);
+  assert.ok(stopped(s.log(), c));
+});
+
+test('busy but already current: just says it is up to date', async () => {
+  const c = 'claude-code-user-mark';
+  const s = setup([c], { busy: true, latest: 'sha256:same', current: 'sha256:same' });
+  const asked = s.askFromWorker(c);
+  await sleep(700);
+  s.runWatcher();
+  const r = await asked;
+  assert.match(r.out, /Already up to date/);
+});
+
+test('recycle-worker itself exits 11 when busy, 0 when not', () => {
+  const c = 'claude-code-user-mark';
+  for (const [busy, code] of [[true, 11], [false, 0]]) {
+    const s = setup([c], { busy });
+    const r = spawnSync('bash', [path.join(scripts, 'recycle-worker'), 'mark'], { env: s.env, encoding: 'utf8' });
+    assert.equal(r.status, code, r.stdout + r.stderr);
+  }
 });
