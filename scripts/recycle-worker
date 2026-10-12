@@ -10,7 +10,10 @@
 #     --notify  tell the worker what is about to happen, via a file it can read
 #               (/workspace/.recycle-result), written as the unprivileged user
 #
-# Exit status: 0 recycled, 10 already current, 1 error.
+# A worker where Claude is working, or waiting for an answer (`agent-service busy`),
+# is left alone unless --force: restarting it would throw the work away.
+#
+# Exit status: 0 recycled, 10 already current, 11 busy (not restarted), 1 error.
 set -uo pipefail
 
 NAME="${1:-}"
@@ -39,6 +42,10 @@ tell() {
 
 docker inspect "$CONTAINER" >/dev/null 2>&1 || { echo "recycle-worker: no container ${CONTAINER}" >&2; exit 1; }
 
+# Exit status 0 from agent-service means a session is working or waiting. Anything else (no service, an old
+# image without the command, a stopped container) means there is nothing to protect.
+busy() { docker exec -u claude "$CONTAINER" agent-service busy >/dev/null 2>&1; }
+
 pull_ok=1
 docker pull "$IMAGE" >/dev/null 2>&1 || pull_ok=0
 latest=$(docker image inspect -f '{{.Id}}' "$IMAGE" 2>/dev/null || echo "")
@@ -56,6 +63,10 @@ if [ "$FORCE" = 0 ]; then
     if [ "$latest" = "$current" ]; then
         tell "Already up to date: this environment is running the newest worker image."
         exit 10
+    fi
+    if busy; then
+        tell "Not restarting: Claude is working, or waiting for your answer, in this environment. Let it finish, or run update-worker --force to restart anyway."
+        exit 11
     fi
     tell "A newer worker image is available. This environment is restarting now and your sessions will end. Log in again to get the new one."
 else

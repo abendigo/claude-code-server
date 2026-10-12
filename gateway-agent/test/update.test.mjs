@@ -42,6 +42,13 @@ test('already current, and a registry failure, are reported as such', async () =
   assert.equal(silent.status, 502);
 });
 
+test('a worker where Claude is working is reported as busy, not as restarting', async () => {
+  const res = await post('working');
+  const body = await res.json();
+  assert.deepEqual([res.status, body.status], [200, 'busy']);
+  assert.match(body.message, /Not restarting: Claude is working/);
+});
+
 test('refuses: no user, no or cross-site origin, GET, and a second update while one runs', async () => {
   assert.equal((await post(null)).status, 401);
   assert.equal((await post('newer', { Origin: 'https://evil.example' })).status, 403);

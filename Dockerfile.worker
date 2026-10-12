@@ -22,14 +22,19 @@ RUN apt-get update && apt-get install -y \
 # Install Claude Code globally
 RUN npm install -g @anthropic-ai/claude-code
 
-# agent-bridge: drives one Claude Code session over stdio for the VR client's
-# conversation view (the gateway runs it via `docker exec -i`). The SDK brings
-# its own matching Claude Code binary, so it is independent of the CLI above.
+# agent-service: owns the Claude Code sessions for the VR client's conversation
+# view, so they outlive the page (headset off, reload). agent-bridge is the thin
+# relay the gateway runs via `docker exec -i` for each page connection: it joins
+# stdin/stdout to the service's socket, starting the service if needed.
+# `agent-service busy` exits 0 while a session is working (the idle reaper and
+# update-worker ask). The SDK brings its own matching Claude Code binary, so it
+# is independent of the CLI above.
 COPY agent/package.json agent/package-lock.json /opt/agent-bridge/
 RUN cd /opt/agent-bridge && npm ci --omit=dev
-COPY agent/bridge.mjs /opt/agent-bridge/bridge.mjs
-RUN printf '#!/bin/sh\nexec node /opt/agent-bridge/bridge.mjs "$@"\n' > /usr/local/bin/agent-bridge && \
-    chmod +x /usr/local/bin/agent-bridge
+COPY agent/attach.mjs agent/service.mjs agent/session.mjs agent/login.mjs /opt/agent-bridge/
+RUN printf '#!/bin/sh\nexec node /opt/agent-bridge/attach.mjs "$@"\n' > /usr/local/bin/agent-bridge && \
+    printf '#!/bin/sh\nexec node /opt/agent-bridge/service.mjs "$@"\n' > /usr/local/bin/agent-service && \
+    chmod +x /usr/local/bin/agent-bridge /usr/local/bin/agent-service
 
 # Install watch-gh-build helper script
 COPY scripts/watch-gh-build /usr/local/bin/watch-gh-build

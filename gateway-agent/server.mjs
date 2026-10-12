@@ -13,7 +13,7 @@ const PORT = Number(process.env.PORT || 7682);
 const WS_PATH = '/ws';
 const MAX_PER_USER = Number(process.env.AGENT_MAX_PER_USER || 4);
 const KILL_AFTER_MS = 5000;
-const ALLOWED_FROM_CLIENT = new Set(['prompt', 'permission', 'interrupt', 'login_start', 'login_code', 'login_cancel']);
+const ALLOWED_FROM_CLIENT = new Set(['prompt', 'permission', 'interrupt', 'login_start', 'login_code', 'login_cancel', 'attach', 'detach', 'list_sessions', 'close_session']);
 
 // Same normalisation as scripts/ttyd-dispatch, so a person lands in the same
 // worker whichever front door they use: lowercase, anything outside
@@ -70,6 +70,7 @@ function updateWorker(slug) {
     readline.createInterface({ input: child.stdout }).on('line', (line) => {
       if (!line.trim() || line.startsWith('recycle-worker:')) return;
       if (/^already up to date/i.test(line)) finish('current', line);
+      else if (/^not restarting/i.test(line)) finish('busy', line); // Claude is working there; recycle-worker left it alone
       else if (/^could not/i.test(line)) finish('error', line);
       else finish('updating', line);
     });
