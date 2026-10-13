@@ -5,7 +5,7 @@
 // session for good, and asks for a second tap within a few seconds.
 // Scrolls like the other windows (onScroll(amount); positive is up).
 import { Panel, roundRect } from './panel.js';
-import { age, visibleSessions, describeSession } from './session-list.js';
+import { age, visibleSessions, describeSession, asleepRows } from './session-list.js';
 
 const SANS = 'ui-sans-serif, system-ui, sans-serif';
 const PAD = 28;
@@ -29,7 +29,7 @@ export class SessionsPanel extends Panel {
     this.offset = 0; // pixels scrolled down the list
     this.spots = [];
     this.hoverSpot = null;
-    this.armed = null; // {id, until}: a session whose cross was tapped once
+    this.armed = null; // {id, until}: a session whose cross was tapped once, or 'clear' for Clear asleep
     this.lastList = 0;
     this.seen = null;
   }
@@ -99,6 +99,20 @@ export class SessionsPanel extends Panel {
     ctx.textAlign = 'left';
     ctx.fillText('Sessions', PAD, HEAD_H / 2);
     const nb = this.spot(w - PAD - 150, 22, 150, HEAD_H - 44, () => { this.client.newSession(); this.after(); });
+    // Clear asleep: close every session that is just sitting on disk, after a second tap.
+    const sleepers = asleepRows(c);
+    const clearArmed = this.armed?.id === 'clear';
+    if (sleepers.length) {
+      const cb = this.spot(nb.x - 12 - 210, 22, 210, HEAD_H - 44, () => this.tapClear(sleepers));
+      ctx.fillStyle = clearArmed ? '#8a2f2f' : this.hoverSpot === cb ? '#2d3f57' : '#1d2733';
+      roundRect(ctx, cb.x, cb.y, cb.w, cb.h, 14);
+      ctx.fill();
+      ctx.fillStyle = '#e6edf5';
+      ctx.font = `600 26px ${SANS}`;
+      ctx.textAlign = 'center';
+      ctx.fillText(clearArmed ? `Close ${sleepers.length}?` : 'Clear asleep', cb.x + cb.w / 2, cb.y + cb.h / 2 + 1);
+      ctx.textAlign = 'left';
+    }
     ctx.fillStyle = this.hoverSpot === nb ? '#2d3f57' : '#1d2733';
     roundRect(ctx, nb.x, nb.y, nb.w, nb.h, 14);
     ctx.fill();
@@ -162,7 +176,7 @@ export class SessionsPanel extends Panel {
     ctx.arc(PAD + 14, y + ROW_H / 2, 12, 0, Math.PI * 2);
     ctx.fill();
 
-    const canClose = Boolean(r.session);
+    const canClose = d.canEnd;
     const crossW = canClose ? 96 : 0;
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
@@ -174,9 +188,9 @@ export class SessionsPanel extends Panel {
     ctx.fillText(d.detail, PAD + 44, y + ROW_H / 2 + 20);
 
     if (canClose) {
-      const armed = this.armed?.id === r.session;
+      const armed = this.armed?.id === d.key;
       const cs = this.spot(w - 20 - crossW, y + 14, crossW - 4, ROW_H - 28, () => {
-        if (armed) { this.armed = null; this.client.closeSession(r.session); this.after(); } else { this.armed = { id: r.session, until: this.clock() + CONFIRM_MS }; this.markDirty(); }
+        if (armed) { this.armed = null; this.client.closeSession(r); this.after(); } else { this.armed = { id: d.key, until: this.clock() + CONFIRM_MS }; this.markDirty(); }
       });
       ctx.fillStyle = armed ? '#8a2f2f' : this.hoverSpot === cs ? '#2d3f57' : '#1d2733';
       roundRect(ctx, cs.x, cs.y, cs.w, cs.h, 12);
@@ -197,6 +211,16 @@ export class SessionsPanel extends Panel {
       }
       ctx.textAlign = 'left';
     }
+  }
+
+  // Clear asleep takes two taps within a few seconds; the second closes them all.
+  tapClear(rows) {
+    if (this.armed?.id === 'clear' && this.clock() <= this.armed.until) {
+      this.armed = null;
+      for (const r of rows) this.client.closeSession(r);
+      this.after();
+    } else this.armed = { id: 'clear', until: this.clock() + CONFIRM_MS };
+    this.markDirty();
   }
 
   // After something that changes the list, ask for it again shortly.

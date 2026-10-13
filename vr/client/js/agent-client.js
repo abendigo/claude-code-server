@@ -22,6 +22,7 @@ export class AgentClient {
     this.attachTimeoutMs = attachTimeoutMs;
     this.backoffMs = backoffMs;
     this.ws = null;
+    this.current = null; // the service's handle for the session being followed
     this.legacy = false; // an old worker with no session service
     this.attached = false;
     this.tries = []; // attach targets still to try if the current one is gone
@@ -121,6 +122,7 @@ export class AgentClient {
   intercept(msg) {
     if (msg.type === 'attached') {
       this.attached = true;
+      this.current = msg.session;
       this.legacy = false;
       this.attempt = 0; // a real connection: the next drop starts the wait from the beginning
       this.tries = [];
@@ -130,6 +132,13 @@ export class AgentClient {
       const here = this.cwd;
       const row = (msg.list ?? []).find((r) => r.state !== 'closed' && (!here || !r.cwd || r.cwd === here || r.cwd.startsWith(here)));
       this.send({ type: 'attach', ...(row ? (row.session ? { session: row.session } : { sdkId: row.sdkId }) : {}), cwd: this.cwd || undefined });
+    } else if (msg.type === 'closed' && msg.session && msg.session === this.current) {
+      // The session we were following was closed (here or in another viewer): move on to the newest, or a new one.
+      this.attached = false;
+      this.current = null;
+      this.tries = [];
+      this.store?.clear();
+      this.begin('last');
     } else if (msg.type === 'error' && !this.attached && GONE.test(msg.message ?? '')) {
       // The remembered session is gone (the service restarted, or it was closed): try the next best thing.
       this.next();
@@ -149,7 +158,12 @@ export class AgentClient {
 
   listSessions() { return this.send({ type: 'list_sessions' }, { quiet: true }); }
 
-  closeSession(session) { return this.send({ type: 'close_session', session }); }
+  // target: a list row, or the service's id for a session. A session known only from its transcript has no
+  // service id and is named by its SDK id. Closing removes it from the list; its transcript is kept.
+  closeSession(target) {
+    const m = typeof target === 'string' ? { session: target } : { ...(target.session ? { session: target.session } : {}), ...(target.sdkId ? { sdkId: target.sdkId } : {}) };
+    return this.send({ type: 'close_session', ...m });
+  }
 
   // Stop one background worker; the session itself carries on.
   stopTask(task) { return this.send({ type: 'stop_task', task }); }

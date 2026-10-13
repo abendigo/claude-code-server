@@ -339,6 +339,74 @@ withService('a client that vanishes with unread data (a connection reset) does n
   assert.equal((await b.next('attached')).session, session);
 });
 
+// ---- closing sessions for good ------------------------------------------------------------
+const listOf = async (v) => { v.send({ type: 'list_sessions' }); return (await v.next('sessions')).list; };
+const startSession = async (svc, prompt) => {
+  const v = await svc.connect();
+  v.send({ type: 'attach' });
+  const at = await v.next('attached');
+  await v.next('history');
+  v.send({ type: 'prompt', text: prompt });
+  await v.next(reply);
+  await v.next((m) => m.type === 'session_state' && m.state === 'idle');
+  const sdkId = fs.readdirSync(svc.env.FAKE_DIR).map((f) => f.replace('.json', '')).find((id) => JSON.parse(fs.readFileSync(path.join(svc.env.FAKE_DIR, `${id}.json`), 'utf8'))[0].message.content === prompt);
+  return { v, session: at.session, sdkId };
+};
+
+withService('a closed session stays gone from the list although its transcript remains on disk', async (svc) => {
+  const a = await startSession(svc, 'old business');
+  const keep = await startSession(svc, 'keep me');
+  a.v.send({ type: 'close_session', session: a.session });
+  await a.v.next('closed');
+  const rows = await listOf(keep.v);
+  assert.ok(!rows.some((r) => r.sdkId === a.sdkId), 'gone');
+  assert.ok(rows.some((r) => r.sdkId === keep.sdkId), 'the other is untouched');
+  assert.ok(fs.existsSync(path.join(svc.env.FAKE_DIR, `${a.sdkId}.json`)), 'the transcript itself is not deleted');
+});
+
+withService('a sleeping session known only from its transcript can be closed by its SDK id', async (svc) => {
+  const a = await startSession(svc, 'long forgotten');
+  a.v.send({ type: 'close_session', session: a.session });
+  await a.v.next('closed');
+  // (a hidden session is gone from the list, so bring it back to prove closing by SDK id works on a transcript-only row)
+  const b = await svc.connect();
+  b.send({ type: 'attach', sdkId: a.sdkId });
+  const at = await b.next('attached');
+  b.send({ type: 'close_session', session: at.session });
+  await b.next('closed');
+  assert.ok(!(await listOf(b)).some((r) => r.sdkId === a.sdkId));
+  // a transcript the service has never held at all:
+  fs.writeFileSync(path.join(svc.env.FAKE_DIR, 'stale-1.json'), JSON.stringify([{ type: 'user', uuid: 'u', session_id: 'stale-1', message: { role: 'user', content: 'ancient' }, parent_tool_use_id: null }]));
+  const row = (await listOf(b)).find((r) => r.sdkId === 'stale-1');
+  assert.equal(row.session, null, 'only on disk');
+  b.send({ type: 'close_session', sdkId: 'stale-1' });
+  await sleep(100);
+  assert.ok(!(await listOf(b)).some((r) => r.sdkId === 'stale-1'), 'closed without ever being attached');
+});
+
+withService('closed sessions stay closed across a service restart, and attaching to one deliberately brings it back', async (svc) => {
+  const a = await startSession(svc, 'to be hidden');
+  a.v.send({ type: 'close_session', session: a.session });
+  await a.v.next('closed');
+  await svc.restart();
+  const b = await svc.connect();
+  assert.ok(!(await listOf(b)).some((r) => r.sdkId === a.sdkId), 'still hidden after a restart');
+  b.send({ type: 'attach', sdkId: a.sdkId });
+  assert.equal((await b.next('attached')).sdkId, a.sdkId);
+  assert.ok((await listOf(b)).some((r) => r.sdkId === a.sdkId), 'attaching on purpose un-hides it');
+});
+
+withService('closing something that is not there, or with nothing to name, says so and breaks nothing', async (svc) => {
+  const a = await svc.connect();
+  a.send({ type: 'close_session' });
+  assert.match((await a.next('error')).message, /no longer there|which session/i);
+  a.send({ type: 'close_session', session: 'nope' });
+  assert.match((await a.next('error')).message, /no longer there/);
+  a.send({ type: 'close_session', sdkId: 'not-a-real-id-but-fine' });
+  a.send({ type: 'busy_query' });
+  assert.equal((await a.next('busy')).busy, false, 'the service is fine');
+});
+
 // ---- background workers ------------------------------------------------------------------
 const tasksMsg = (m) => m.type === 'tasks';
 const running = (m) => m.type === 'tasks' && m.tasks.some((t) => t.status === 'running');

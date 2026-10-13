@@ -12,7 +12,7 @@
 //     {type:'attach', session?, sdkId?, cwd?}   follow a session (new when neither id is given)
 //     {type:'detach'}                           stop following; the session keeps running
 //     {type:'list_sessions'}
-//     {type:'close_session', session}           end a session for good
+//     {type:'close_session', session?, sdkId?}  end a session for good: it leaves the list (its transcript is kept)
 //     {type:'prompt', text, cwd?, resume?}      a message to the session being followed
 //     {type:'permission', id, allow, always?} / {type:'interrupt'} / {type:'stop_task', task}   stop one background worker
 //     {type:'login_start'} / {type:'login_code', code} / {type:'login_cancel'}
@@ -43,6 +43,7 @@ const IDLE_STOP_MS = Number(process.env.AGENT_IDLE_STOP_MS || 30 * 60_000);
 const SWEEP_MS = Number(process.env.AGENT_SWEEP_MS || 60_000);
 const MAX_LIST = 30;
 const PIDFILE = path.join(STATE_DIR, 'service.pid');
+const HIDDEN_FILE = path.join(STATE_DIR, 'hidden.json');
 
 // Background workers: slow jobs are handed to a worker so the main session stays free to talk.
 // AGENT_WORKERS=0 turns it off; AGENT_WORKER_MODEL picks the workers' model (default: the main one).
@@ -102,6 +103,14 @@ const env = {
   permissionMode: process.env.AGENT_PERMISSION_MODE || 'default',
 };
 
+// Sessions the user has closed. A session lives on in the SDK's transcripts on disk, which the list is built
+// from, so closing has to be remembered here or it would come straight back as "asleep". Attaching to one on
+// purpose brings it back. Kept in a file so it survives a restart.
+const hidden = new Set((() => { try { const a = JSON.parse(fs.readFileSync(HIDDEN_FILE, 'utf8')); return Array.isArray(a) ? a.filter((x) => typeof x === 'string') : []; } catch { return []; } })());
+function saveHidden() {
+  try { fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 }); fs.writeFileSync(HIDDEN_FILE, JSON.stringify([...hidden]), { mode: 0o600 }); } catch (e) { log('could not save the closed-sessions list', e.message); }
+}
+
 const sessions = new Map(); // service id -> Session
 const loginFlow = new LoginFlow();
 
@@ -143,6 +152,7 @@ class Viewer {
   }
 
   async attach({ session: id, sdkId, cwd }, legacy = false) {
+    if (sdkId && hidden.delete(sdkId)) saveHidden(); // asking for it by name brings a closed session back
     let s = id ? sessions.get(id) : sdkId ? findBySdkId(sdkId) : null;
     if (id && !s) return this.send({ type: 'error', message: 'That session is no longer there.' });
     if (!s) s = makeSession({ cwd, resume: sdkId, legacy });
@@ -172,8 +182,12 @@ class Viewer {
       case 'detach': this.detach(); break;
       case 'list_sessions': this.send({ type: 'sessions', list: await listSessions() }); break;
       case 'close_session': {
-        const s = sessions.get(msg.session);
-        if (s) s.close(); else this.send({ type: 'error', message: 'That session is no longer there.' });
+        // By the service's handle for a live or dormant session it holds, or by SDK id for one known only from its transcript.
+        const held = typeof msg.session === 'string' ? sessions.get(msg.session) : null;
+        const sdkId = held?.sdkId ?? (typeof msg.sdkId === 'string' ? msg.sdkId : null);
+        if (!held && !sdkId) { this.send({ type: 'error', message: msg.session ? 'That session is no longer there.' : 'Which session? Name it by id.' }); break; }
+        (held ?? findBySdkId(sdkId))?.close();
+        if (sdkId) { hidden.add(sdkId); saveHidden(); }
         break;
       }
       case 'prompt': {
@@ -205,7 +219,7 @@ async function listSessions() {
   }));
   try {
     for (const info of await sdk.listSessions({ limit: MAX_LIST })) {
-      if (known.some((s) => s.sdkId === info.sessionId)) continue;
+      if (known.some((s) => s.sdkId === info.sessionId) || hidden.has(info.sessionId)) continue;
       rows.push({ session: null, sdkId: info.sessionId, cwd: info.cwd ?? '', summary: info.customTitle || info.firstPrompt || info.summary || '', lastModified: info.lastModified, state: 'dormant', live: false, viewers: 0 });
     }
   } catch (e) { log('could not list sessions', e.message); }

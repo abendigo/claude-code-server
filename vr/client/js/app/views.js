@@ -3,7 +3,7 @@
 import { h, fill } from './dom.js';
 import { renderMarkdown } from './markdown-dom.js';
 import { headerStatus, activityRows, backgroundRows, fmtDuration } from '../activity.js';
-import { visibleSessions, describeSession } from '../session-list.js';
+import { visibleSessions, describeSession, asleepRows } from '../session-list.js';
 
 const STATE_LABEL = { offline: 'offline', connecting: 'connecting', idle: 'ready', working: 'working', waiting: 'needs your answer' };
 
@@ -45,17 +45,19 @@ export function stateLabel(convo) {
 
 // ---- sessions -----------------------------------------------------------------------
 // armed: the session whose End button was tapped once (a second tap ends it).
-export function renderSessions(el, convo, now, { onNew, onSwitch, onEnd, armed }) {
+export function renderSessions(el, convo, now, { onNew, onSwitch, onEnd, onClear = null, armed, armedClear = false }) {
   const rows = visibleSessions(convo).map((r) => {
     const d = describeSession(r, convo, now);
     return h('li', { class: `row ${d.state}${d.current ? ' current' : ''}` },
       h('button', { class: 'pick', onclick: () => { if (!d.current) onSwitch(r); }, 'aria-current': d.current },
         h('span', { class: `dot ${d.state}`, 'aria-hidden': 'true' }),
         h('span', { class: 'text' }, h('span', { class: 'label' }, d.label), h('span', { class: 'detail' }, d.detail))),
-      d.canEnd && h('button', { class: `end${armed === r.session ? ' armed' : ''}`, 'aria-label': 'End this session', onclick: () => onEnd(r) }, armed === r.session ? 'End?' : '×'));
+      d.canEnd && h('button', { class: `end${armed === d.key ? ' armed' : ''}`, 'aria-label': 'End this session', onclick: () => onEnd(r) }, armed === d.key ? 'End?' : '×'));
   });
   fill(el,
-    h('div', { class: 'pane-head' }, h('h2', {}, 'Sessions'), h('button', { onclick: onNew }, 'New')),
+    h('div', { class: 'pane-head' }, h('h2', {}, 'Sessions'), h('span', { class: 'actions' },
+      onClear && asleepRows(convo).length ? h('button', { class: `clear${armedClear ? ' armed' : ''}`, onclick: onClear }, armedClear ? `Close ${asleepRows(convo).length}?` : 'Clear asleep') : null,
+      h('button', { onclick: onNew }, 'New'))),
     rows.length ? h('ul', { class: 'sessions' }, rows) : h('p', { class: 'empty' }, 'No sessions yet.'));
 }
 

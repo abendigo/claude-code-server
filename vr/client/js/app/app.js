@@ -9,6 +9,7 @@ import { LoginFlow, LoginDialog } from '../login.js';
 import { WindowFeed } from '../window-feed.js';
 import { Voice } from '../voice.js';
 import { approvalIntent, cleanTranscript } from '../transcript.js';
+import { asleepRows } from '../session-list.js';
 import { renderLog, renderApproval, renderSessions, renderActivity, renderDocs, stateLabel } from './views.js';
 import { sendPrompt, answerApproval, stopWork } from './actions.js';
 
@@ -32,8 +33,10 @@ new LoginDialog(login);
 // ---- state of the page itself ---------------------------------------------------------
 const docs = new Map(); // id -> {title, text}
 let selectedDoc = null;
-let armed = null; // session whose End was tapped once
+let armed = null; // session whose End was tapped once (its list key)
 let armedTimer = null;
+let armedClear = false; // Clear asleep tapped once
+let armedClearTimer = null;
 let armedTask = null; // worker whose Stop was tapped once
 let armedTaskTimer = null;
 let wasWorking = false;
@@ -49,11 +52,21 @@ function draw() {
   renderApproval($('approval'), convo, { onAnswer: (k) => answerApproval(convo, client, k) });
   renderSessions($('sessions'), convo, now, {
     armed,
+    armedClear,
+    onClear: () => {
+      if (armedClear) { armedClear = false; for (const r of asleepRows(convo)) client.closeSession(r); refreshSoon(); } else {
+        armedClear = true;
+        clearTimeout(armedClearTimer);
+        armedClearTimer = setTimeout(() => { armedClear = false; render(); }, 3000);
+      }
+      render();
+    },
     onNew: () => { client.newSession(); refreshSoon(); },
     onSwitch: (r) => { client.switchTo(r); refreshSoon(); },
     onEnd: (r) => {
-      if (armed === r.session) { armed = null; client.closeSession(r.session); refreshSoon(); } else {
-        armed = r.session;
+      const key = r.session ?? r.sdkId;
+      if (armed === key) { armed = null; client.closeSession(r); refreshSoon(); } else {
+        armed = key;
         clearTimeout(armedTimer);
         armedTimer = setTimeout(() => { armed = null; render(); }, 3000);
       }
