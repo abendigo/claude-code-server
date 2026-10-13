@@ -69,6 +69,38 @@ test('prefers an installed voice in the browser language', () => {
   assert.equal(e.synth.spoken[0].lang, 'en-US');
 });
 
+test('splitSpoken: a reply that only MENTIONS the tag keeps all its text (this once cut a reply to four lines)', () => {
+  const reply = 'Yes.\n\n- You get the same `<spoken>` line you have been hearing.\n- Where it can fail: leaving the page.\n\nWhich do you prefer?\n\n<spoken>Yes, I will speak when I finish.</spoken>';
+  const { text, spoken } = splitSpoken(reply);
+  assert.equal(spoken, 'Yes, I will speak when I finish.');
+  assert.match(text, /same `<spoken>` line/);
+  assert.match(text, /Where it can fail/);
+  assert.match(text, /Which do you prefer\?$/);
+  assert.ok(!text.includes('I will speak when I finish'));
+});
+
+test('splitSpoken: mentions without backticks, closing-tag mentions and a streaming summary after a mention', () => {
+  // an unquoted mention in prose, then the real block
+  const a = splitSpoken('I end every reply with a <spoken> line.\n\nMore detail here.\n\n<spoken>All done.</spoken>');
+  assert.equal(a.spoken, 'All done.');
+  assert.match(a.text, /More detail here\.$/);
+  assert.match(a.text, /with a <spoken> line/);
+  // a mention in backticks and no real summary yet: nothing is hidden
+  assert.deepEqual(splitSpoken('Use the `<spoken>` tag like `<spoken>this</spoken>`.'), { text: 'Use the `<spoken>` tag like `<spoken>this</spoken>`.', spoken: null });
+  // streaming: a mention earlier, the real tag half-written at the end
+  assert.equal(splitSpoken('Mentions `<spoken>` once.\n\nBody.\n\n<spoken>I fix').text, 'Mentions `<spoken>` once.\n\nBody.');
+  // an unclosed tag followed by a long, multi-paragraph body is not a summary
+  const long = 'Intro <spoken> mentioned.\n\n' + 'Detail. '.repeat(120);
+  assert.equal(splitSpoken(long).text, long.trimEnd());
+});
+
+test('splitSpoken: the summary on the same line as the last sentence still counts, and only the last pair is taken', () => {
+  assert.deepEqual(splitSpoken('Done. <spoken>Finished it.</spoken>'), { text: 'Done.', spoken: 'Finished it.' });
+  const two = splitSpoken('A\n<spoken>first</spoken>\nB\n<spoken>second</spoken>');
+  assert.equal(two.spoken, 'second');
+  assert.match(two.text, /first/);
+});
+
 test('splitSpoken separates the summary and hides a tag still streaming in', () => {
   assert.deepEqual(splitSpoken('Done.\n\n<spoken>I fixed it.</spoken>'), { text: 'Done.', spoken: 'I fixed it.' });
   assert.deepEqual(splitSpoken('No tag here'), { text: 'No tag here', spoken: null });

@@ -3,16 +3,29 @@
 // short <spoken>...</spoken> summary; that tag is stripped from what is shown
 // and is what gets spoken. If a reply has no tag, the first couple of
 // sentences are spoken instead.
-const TAG = /<spoken>([\s\S]*?)<\/spoken>/i;
+// A summary is a <spoken>...</spoken> pair. A reply that merely MENTIONS the tag
+// (in prose, or in `backticks`) must keep its text, so a pair counts only when it
+// is not wrapped in backticks and contains no other opening tag.
+const PAIR = /(?<!`)<spoken>((?:(?!<spoken>)[\s\S])*?)<\/spoken>(?!`)/gi;
+// A summary still streaming in: the last opening tag, never closed, short, within one paragraph.
+const OPEN_TAIL = /(?<!`)<spoken>(?![\s\S]*<\/spoken>)(?!(?:[\s\S]*<spoken>))([\s\S]*)$/i;
+const MAX_STREAMING_SUMMARY = 700;
 
 // Separate a reply into the text to display and the text to speak. Also hides a
 // tag that is still streaming in, so it never flashes on screen half-written.
 export function splitSpoken(raw) {
   let text = String(raw ?? '');
   let spoken = null;
-  const m = TAG.exec(text);
-  if (m) { spoken = m[1].trim() || null; text = text.replace(TAG, ''); }
-  text = text.replace(/<spoken>[\s\S]*$/i, '').replace(/<(?:s(?:p(?:o(?:k(?:e(?:n)?)?)?)?)?)?$/i, '');
+  let last = null;
+  for (const m of text.matchAll(PAIR)) last = m;
+  if (last) {
+    spoken = last[1].trim() || null;
+    text = text.slice(0, last.index) + text.slice(last.index + last[0].length);
+  } else {
+    const open = OPEN_TAIL.exec(text);
+    if (open && open[1].length <= MAX_STREAMING_SUMMARY && !/\n\s*\n/.test(open[1])) text = text.slice(0, open.index);
+  }
+  text = text.replace(/<(?:s(?:p(?:o(?:k(?:e(?:n)?)?)?)?)?)?$/i, '');
   return { text: text.trimEnd(), spoken };
 }
 
