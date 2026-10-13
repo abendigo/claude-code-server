@@ -26,6 +26,7 @@ const { VoicePanel } = await import('../client/js/voice-panel.js');
 const { KeyboardPanel } = await import('../client/js/keyboard-panel.js');
 const { Panel } = await import('../client/js/panel.js');
 const { ActivityPanel } = await import('../client/js/activity-panel.js');
+const { SessionsPanel } = await import('../client/js/sessions-panel.js');
 const { quickKeys, snippetPanel } = await import('../client/js/button-panel.js');
 const { init, permissionRequest } = await import('./fixtures.mjs');
 await new Promise((r) => setTimeout(r, 5));
@@ -48,6 +49,7 @@ const keyboard = place(new KeyboardPanel({ onSend() {} }), LAYOUT.keyboard);
 const keys = place(quickKeys(() => {}, {}), LAYOUT.keys);
 const snippets = place(snippetPanel([...Array(12)].map((_, i) => ({ label: `s${i}`, text: 'x' })), () => {}), LAYOUT.snippets);
 const activity = place(new ActivityPanel({ getConversation: () => convo.convo, widthM: LAYOUT.activity.widthM }), LAYOUT.activity);
+const sessions = place(new SessionsPanel({ getConversation: () => convo.convo, client: { open: true, listSessions() {}, switchTo() {}, newSession() {}, closeSession() {} }, widthM: LAYOUT.sessions.widthM }), LAYOUT.sessions);
 // TerminalPanel imports xterm through the browser's import map, which Node can't
 // resolve, so use a stand-in with its real size (1.3 m wide, 100x30 cells ~ 0.67 aspect).
 const terminal = place(new Panel({ widthM: 1.3, heightM: 1.3 * 0.67, pxW: 1628, pxH: 1088, name: 'term 1' }), terminalPlacement(1));
@@ -93,6 +95,7 @@ const controls = new Map([
   [keyboard, keyboardControls()],
   [keys, gridControls(keys, 'keys')],
   [snippets, gridControls(snippets, 'snippet')],
+  [sessions, [{ name: 'sessions New button', u: 0.9, v: 0.05 }, { name: 'sessions first row', u: 0.5, v: 0.17 }, { name: 'sessions centre', u: 0.5, v: 0.5 }]],
   [activity, [{ name: 'activity centre', u: 0.5, v: 0.5 }, { name: 'activity status', u: 0.5, v: 0.05 }, { name: 'activity newest row', u: 0.5, v: 0.95 }]],
   [terminal, [{ name: 'terminal centre', u: 0.5, v: 0.5 }, { name: 'terminal title', u: 0.5, v: 0.02 }]],
 ]);
@@ -106,25 +109,37 @@ for (const w of windows.windows) {
 
 const EYES = [];
 for (const y of [1.1, 1.4, 1.7]) for (const x of [-0.3, 0, 0.3]) EYES.push(new THREE.Vector3(x, y, 0));
-const meshes = panels.map((p) => p.mesh);
 const raycaster = new THREE.Raycaster();
 
-function firstHit(eye, target) {
-  raycaster.set(eye, target.clone().sub(eye).normalize());
-  return raycaster.intersectObjects(meshes, false)[0]?.object.userData.panel ?? null;
-}
+// What is on screen together. The tools (keyboard, quick keys, snippets, terminals) are hidden by
+// default and the Sessions window is opened on demand; they are not expected side by side, so each
+// scene is checked on its own: nothing in a scene may hide a control of anything else in it.
+const TOOLS = new Set([keyboard, keys, snippets, terminal]);
+const scenes = {
+  'default view, Sessions open': (p) => !TOOLS.has(p),
+  'tools shown': (p) => p !== sessions,
+};
+const inScene = (name, panel) => scenes[name](panel.owner ?? panel);
 
-for (const [panel, list] of controls) {
-  test(`${panel.name}: every control is the first thing you see (${list.length} controls)`, () => {
-    const g = panel.mesh.geometry.parameters;
-    const hidden = [];
-    for (const c of list) {
-      const world = panel.mesh.localToWorld(new THREE.Vector3((c.u - 0.5) * g.width, (0.5 - c.v) * g.height, 0));
-      for (const eye of EYES) {
-        const hit = firstHit(eye, world);
-        if (hit !== panel) hidden.push(`${c.name} (eye ${eye.x},${eye.y}) hidden behind ${hit?.name ?? 'nothing'}`);
+for (const name of Object.keys(scenes)) {
+  const meshes = panels.filter((p) => inScene(name, p)).map((p) => p.mesh);
+  const firstHit = (eye, target) => {
+    raycaster.set(eye, target.clone().sub(eye).normalize());
+    return raycaster.intersectObjects(meshes, false)[0]?.object.userData.panel ?? null;
+  };
+  for (const [panel, list] of controls) {
+    if (!inScene(name, panel)) continue;
+    test(`[${name}] ${panel.name}: every control is the first thing you see (${list.length} controls)`, () => {
+      const g = panel.mesh.geometry.parameters;
+      const hidden = [];
+      for (const c of list) {
+        const world = panel.mesh.localToWorld(new THREE.Vector3((c.u - 0.5) * g.width, (0.5 - c.v) * g.height, 0));
+        for (const eye of EYES) {
+          const hit = firstHit(eye, world);
+          if (hit !== panel) hidden.push(`${c.name} (eye ${eye.x},${eye.y}) hidden behind ${hit?.name ?? 'nothing'}`);
+        }
       }
-    }
-    assert.deepEqual(hidden.slice(0, 8), [], `${hidden.length} occlusions`);
-  });
+      assert.deepEqual(hidden.slice(0, 8), [], `${hidden.length} occlusions`);
+    });
+  }
 }

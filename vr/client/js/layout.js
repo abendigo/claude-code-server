@@ -12,6 +12,8 @@ export const LAYOUT = {
   snippets: { pos: [1.25, 0.85, -0.85], rotX: -0.35, rotY: -0.5 },
   // The Activity window: a glance to the right of the conversation shows what Claude is doing.
   activity: { widthM: 0.8, pos: [1.6, 1.6, -1.2], rotX: 0, rotY: -0.55 },
+  // The Sessions window, opened from the Claude header: low on the right, under the Activity window.
+  sessions: { widthM: 0.7, pos: [1.5, 0.65, -1.1], rotX: -0.35, rotY: -0.5 },
 };
 
 // i-th opened document window (0-based): to the left of the conversation, each one

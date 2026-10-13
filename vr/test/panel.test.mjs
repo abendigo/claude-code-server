@@ -27,6 +27,8 @@ const { ConversationPanel } = await import('../client/js/conversation-panel.js')
 const { VoicePanel } = await import('../client/js/voice-panel.js');
 const { init, reply, toolUse, toolResult, result, permissionRequest } = await import('./fixtures.mjs');
 const tick = () => new Promise((r) => setTimeout(r, 5));
+// On connect the page also sends attach / list_sessions; these tests look at what the user said.
+const prompts = (ws) => ws.sent.filter((m) => m.type === 'prompt');
 
 async function make(opts = {}) {
   for (const k of Object.keys(storage)) delete storage[k];
@@ -54,7 +56,7 @@ test('typing and Enter sends a prompt with the working directory; input clears',
   for (const ch of 'hi there') p.send(ch);
   p.send('\x7f'); // backspace
   p.send('\r');
-  assert.deepEqual(ws.sent, [{ type: 'prompt', text: 'hi ther', cwd: '/workspace/proj' }]);
+  assert.deepEqual(prompts(ws), [{ type: 'prompt', text: 'hi ther', cwd: '/workspace/proj' }]);
   assert.equal(p.input, '');
   assert.equal(p.convo.state, 'working');
 });
@@ -63,7 +65,7 @@ test('paste fills the input without sending; Escape clears it', async () => {
   const { p, ws } = await make();
   p.paste('some dictated text');
   assert.equal(p.input, 'some dictated text');
-  assert.equal(ws.sent.length, 0);
+  assert.equal(prompts(ws).length, 0);
   p.send('\x1b');
   assert.equal(p.input, '');
 });
@@ -127,16 +129,28 @@ test('scrolling up shows the "newer below" hint and ▼ returns to the bottom', 
   assert.equal(p.scroll, 0);
 });
 
-test('session id is remembered; Resume sends it with the first prompt only', async () => {
-  const { p, ws } = await make();
+test('a worker without the session service: the id is remembered and Resume sends it with the first prompt only', async () => {
+  const { p, ws } = await make({ attachTimeoutMs: 20 });
   ws.emit(init);
   assert.equal(storage['vr.agent.session'], 'sess-1');
+  await new Promise((r) => setTimeout(r, 60)); // nobody answered attach: an old worker
+  assert.equal(p.client.legacy, true);
   p.resume();
   const ws2 = FakeWS.last;
   await tick();
+  await new Promise((r) => setTimeout(r, 60));
   p.submit('continue please');
   p.submit('and again');
-  assert.deepEqual(ws2.sent.map((m) => m.resume), ['sess-1', undefined]);
+  assert.deepEqual(prompts(ws2).map((m) => m.resume), ['sess-1', undefined]);
+});
+
+test('with the session service the first prompt does not carry a resume id', async () => {
+  const { p, ws } = await make();
+  ws.emit({ type: 'attached', session: 'svc1', sdkId: 'sess-1', cwd: '/workspace/proj', state: 'idle' });
+  ws.emit({ type: 'history', messages: [] });
+  p.submit('hello');
+  assert.equal(prompts(ws)[0].resume, undefined);
+  assert.equal(storage['vr.agent.svc'], 'svc1');
 });
 
 test('New clears the remembered session', async () => {
@@ -194,7 +208,7 @@ test('dictation to a conversation is sent as soon as you stop talking (no Send t
   assert.equal(vp.isDirect(), true); // the default for a conversation
   vp.mode = 'command'; // would lowercase and strip the period for a terminal
   await dictate(vp);
-  assert.deepEqual(ws.sent.map((m) => [m.type, m.text]), [['prompt', 'Please run the tests.']]);
+  assert.deepEqual(prompts(ws).map((m) => [m.type, m.text]), [['prompt', 'Please run the tests.']]);
 });
 
 test('a terminal still defaults to Review, and the two preferences are independent', async () => {
@@ -216,7 +230,7 @@ test('with "After: Review" chosen, dictation to a conversation waits for Send', 
   await dictate(vp);
   assert.equal(vp.state, 'review');
   vp.confirm(false);
-  assert.deepEqual(ws.sent.map((m) => m.text), ['Fix the failing test']);
+  assert.deepEqual(prompts(ws).map((m) => m.text), ['Fix the failing test']);
 });
 
 test('voice bar has a Tools button that reflects and flips the tool group', async () => {
@@ -286,4 +300,53 @@ test('with no speech engine the header says so instead of hiding the button', as
   assert.ok(draw(p).includes('Speak: n/a'));
   clickByText(p, 'Speak: n/a');
   assert.match(p.convo.blocks.at(-1).text, /no speech engine/);
+});
+
+// ---- Sessions button, "more above", and jumping to the start of a long reply ---------------
+test('the header has a Sessions button when the page supplies one, and no Resume with the session service', async () => {
+  const { p, ws } = await make();
+  ws.emit({ type: 'attached', session: 'svc1', sdkId: 'sess-1', cwd: '/workspace/proj', state: 'idle' });
+  assert.ok(!draw(p).includes('Sessions'), 'no button until the page wires one');
+  let toggled = 0;
+  p.onToggleSessions = () => { toggled++; };
+  assert.match(draw(p), /Sessions/);
+  assert.ok(!draw(p).includes('Resume'));
+  clickByText(p, 'Sessions');
+  assert.equal(toggled, 1);
+});
+
+const longReply = (n) => Array.from({ length: n }, (_, i) => `Line number ${i + 1} of the reply.`).join('\n');
+
+test('"more above" appears when the top of the conversation is out of view', async () => {
+  const { p, ws } = await make();
+  [init, ...reply('a1', 'Hi')].forEach((m) => ws.emit(m));
+  assert.ok(!draw(p).includes('more above'), 'a short conversation fits');
+  p.convo.blocks.push({ kind: 'assistant', text: longReply(60), raw: '', final: true });
+  p.lines = null;
+  assert.match(draw(p), /more above/);
+});
+
+test('a long reply that has just finished streaming opens at its start, not its end', async () => {
+  const { p, ws } = await make();
+  [init].forEach((m) => ws.emit(m));
+  p.submit('tell me a lot');
+  const text = longReply(80).replaceAll('\n', ' \n ');
+  [...reply('a1', text.replaceAll(' \n ', '\n'))].forEach((m) => ws.emit(m));
+  const shown = draw(p);
+  assert.match(shown, /Line number 1 of the reply/, 'the first line is on screen');
+  assert.ok(!shown.includes('Line number 80 of the reply'), 'the last line is below');
+  assert.match(shown, /newer below/);
+  assert.ok(p.scroll > 0);
+});
+
+test('a short reply, and a replayed history, still follow the end', async () => {
+  const { p, ws } = await make();
+  [init, ...reply('a1', 'Short answer.')].forEach((m) => ws.emit(m));
+  draw(p);
+  assert.equal(p.scroll, 0);
+  ws.emit({ type: 'attached', session: 'svc1', sdkId: 'sess-1', cwd: '/workspace/proj', state: 'idle' });
+  ws.emit({ type: 'history', messages: [{ type: 'user_prompt', text: 'hi', at: 1 }, { type: 'sdk', message: { type: 'assistant', parent_tool_use_id: null, message: { id: 'h1', content: [{ type: 'text', text: longReply(80) }] } } }] });
+  const shown = draw(p);
+  assert.match(shown, /Line number 80 of the reply/, 'history opens at the bottom');
+  assert.equal(p.scroll, 0);
 });
