@@ -60,11 +60,11 @@ test('while working the header shows the elapsed time and the running tool', () 
   const c = new Conversation({ now: t.fn });
   feed(c, [init]);
   c.setState('idle');
-  assert.deepEqual(headerStatus(c, t.now), { tone: 'idle', label: 'Ready', time: '', detail: '' });
+  assert.deepEqual(headerStatus(c, t.now), { tone: 'idle', label: 'Ready', time: '', detail: '', workers: 0 });
 
   c.submit('go');
   t.now += 3000;
-  assert.deepEqual(headerStatus(c, t.now), { tone: 'working', label: 'Working', time: '3s', detail: 'Thinking' });
+  assert.deepEqual(headerStatus(c, t.now), { tone: 'working', label: 'Working', time: '3s', detail: 'Thinking', workers: 0 });
   feed(c, [toolUse('t1', 'Bash', { command: 'sleep 60', description: 'Wait a minute' })]);
   t.now += 62_000;
   const h = headerStatus(c, t.now);
@@ -97,7 +97,7 @@ test('offline and connecting', () => {
   assert.equal(headerStatus(c, 0).tone, 'offline');
   c.setState('connecting');
   c.status = 'creating environment...';
-  assert.deepEqual(headerStatus(c, 0), { tone: 'connecting', label: 'Connecting', time: '', detail: 'creating environment...' });
+  assert.deepEqual(headerStatus(c, 0), { tone: 'connecting', label: 'Connecting', time: '', detail: 'creating environment...', workers: 0 });
 });
 
 test('rows: what you asked, then each tool with its status and duration', () => {
@@ -191,4 +191,60 @@ test('the Activity panel draws every state, scrolls within bounds, and keeps mov
 test('with no conversation yet the panel draws without failing', () => {
   const p = new ActivityPanel({ getConversation: () => null });
   assert.doesNotThrow(() => { p.update(); p.onScroll(3); p.update(); });
+});
+
+// ---- background workers ------------------------------------------------------------------
+const { backgroundRows } = await import('../client/js/activity.js');
+const task = (extra = {}) => ({ id: 'w1', description: 'Run the tests', status: 'running', startedAt: 1_000_000, endedAt: null, last: 'Bash', summary: '', ...extra });
+
+test('workers: the model keeps the list the service sends, for the session it follows', () => {
+  const c = new Conversation();
+  c.handle({ type: 'attached', session: 'svc1', sdkId: 'k1', cwd: '/w', state: 'idle', tasks: [task()] });
+  assert.equal(c.tasks.length, 1);
+  c.handle({ type: 'tasks', session: 'svc1', tasks: [task(), task({ id: 'w2' })] });
+  assert.equal(c.tasks.length, 2);
+  c.handle({ type: 'tasks', session: 'someone-else', tasks: [] });
+  assert.equal(c.tasks.length, 2, 'another session\'s workers are not ours');
+  c.handle({ type: 'attached', session: 'svc2', sdkId: 'k2', cwd: '/w', state: 'idle' });
+  assert.deepEqual(c.tasks, [], 'switching sessions starts from that session\'s own list');
+});
+
+test('workers: ready, with workers going, says so and stays ready to talk', () => {
+  const c = new Conversation();
+  c.handle({ type: 'attached', session: 'svc1', sdkId: 'k1', cwd: '/w', state: 'idle', tasks: [task(), task({ id: 'w2', description: 'Lint' })] });
+  const h = headerStatus(c, 2_000_000);
+  assert.deepEqual([h.tone, h.label, h.detail, h.workers], ['idle', 'Ready', '2 workers running', 2]);
+  c.handle({ type: 'tasks', session: 'svc1', tasks: [task(), task({ id: 'w2', status: 'completed', endedAt: 1_500_000 })] });
+  assert.equal(headerStatus(c, 2_000_000).detail, '1 worker running');
+  c.handle({ type: 'tasks', session: 'svc1', tasks: [task({ status: 'completed', endedAt: 1_500_000 })] });
+  assert.equal(headerStatus(c, 2_000_000).workers, 0);
+});
+
+test('workers: rows give how long each has run or took, and what the worker last did', () => {
+  const c = new Conversation();
+  c.handle({ type: 'attached', session: 'svc1', sdkId: 'k1', cwd: '/w', state: 'idle', tasks: [task(), task({ id: 'w2', description: 'Lint', status: 'completed', startedAt: 1_000_000, endedAt: 1_030_000, summary: 'Lint finished cleanly' })] });
+  const rows = backgroundRows(c, 1_090_000);
+  assert.deepEqual(rows.map((r) => [r.text, r.status, r.ms, r.last]), [['Run the tests', 'running', 90_000, 'Bash'], ['Lint', 'completed', 30_000, 'Bash']]);
+  assert.equal(rows[1].summary, 'Lint finished cleanly');
+  assert.deepEqual(backgroundRows(new Conversation(), 0), []);
+});
+
+test('a worker waking the session starts a turn with no prompt: the timer starts then', () => {
+  const t = clockAt();
+  const c = new Conversation({ now: t.fn });
+  c.handle({ type: 'attached', session: 'svc1', sdkId: 'k1', cwd: '/w', state: 'idle', tasks: [task()] });
+  t.now += 20_000;
+  c.handle({ type: 'session_state', session: 'svc1', state: 'working' });
+  assert.equal(c.turnStarted, t.now);
+  t.now += 3000;
+  assert.equal(headerStatus(c, t.now).time, '3s');
+});
+
+test('sessions list: rows say how many workers are running', async () => {
+  const { describeSession } = await import('../client/js/session-list.js');
+  const c = new Conversation();
+  c.attach = { session: 's1', cwd: '/w' };
+  assert.match(describeSession({ session: 's2', summary: 'x', state: 'idle', workers: 2, lastModified: 1 }, c, 100).detail, /2 workers running/);
+  assert.match(describeSession({ session: 's2', summary: 'x', state: 'idle', workers: 1, lastModified: 1 }, c, 100).detail, /1 worker running/);
+  assert.ok(!/worker/.test(describeSession({ session: 's2', summary: 'x', state: 'idle', workers: 0, lastModified: 1 }, c, 100).detail));
 });

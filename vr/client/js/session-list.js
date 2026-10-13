@@ -27,5 +27,6 @@ export function describeSession(row, convo, now) {
   if (row.lastModified) bits.push(age(row.lastModified, now));
   if (current) bits.push('this one');
   if (row.viewers > 1) bits.push(`${row.viewers} watching`);
+  if (row.workers) bits.push(`${row.workers} ${row.workers === 1 ? 'worker' : 'workers'} running`);
   return { label: (row.summary || '(nothing asked yet)').replace(/\s+/g, ' '), state, current, detail: bits.join(' · '), canEnd: Boolean(row.session) };
 }

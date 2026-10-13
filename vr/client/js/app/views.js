@@ -2,7 +2,7 @@
 // they hold no state of their own, so rendering again is always safe.
 import { h, fill } from './dom.js';
 import { renderMarkdown } from './markdown-dom.js';
-import { headerStatus, activityRows, fmtDuration } from '../activity.js';
+import { headerStatus, activityRows, backgroundRows, fmtDuration } from '../activity.js';
 import { visibleSessions, describeSession } from '../session-list.js';
 
 const STATE_LABEL = { offline: 'offline', connecting: 'connecting', idle: 'ready', working: 'working', waiting: 'needs your answer' };
@@ -60,8 +60,14 @@ export function renderSessions(el, convo, now, { onNew, onSwitch, onEnd, armed }
 }
 
 // ---- activity -----------------------------------------------------------------------
-export function renderActivity(el, convo, now) {
+// armedTask: the worker whose Stop was tapped once (a second tap stops it). onStopTask(id) stops it.
+export function renderActivity(el, convo, now, { onStopTask = null, armedTask = null } = {}) {
   const st = headerStatus(convo, now);
+  const workers = backgroundRows(convo, now).map((w) => h('li', { class: `worker ${w.status}` },
+    h('span', { class: 'mark', 'aria-hidden': 'true' }),
+    h('span', { class: 'what' }, h('span', { class: 'name' }, w.text), h('span', { class: 'sub' }, w.status === 'running' ? (w.last ? `using ${w.last}` : 'starting') : w.status === 'completed' ? (w.summary || 'finished') : w.status)),
+    w.ms !== null && h('span', { class: 'time' }, fmtDuration(w.ms)),
+    w.status === 'running' && onStopTask && h('button', { class: `stop${armedTask === w.id ? ' armed' : ''}`, onclick: () => onStopTask(w.id) }, armedTask === w.id ? 'Stop?' : 'Stop')));
   const rows = activityRows(convo, now).map((r) => {
     if (r.kind === 'turn') return h('li', { class: 'turn' }, r.text);
     if (r.kind === 'tool') return h('li', { class: `tool ${r.status}` }, h('span', { class: 'mark', 'aria-hidden': 'true' }), h('span', { class: 'what' }, r.text), r.ms !== null && h('span', { class: 'time' }, fmtDuration(r.ms)));
@@ -69,6 +75,7 @@ export function renderActivity(el, convo, now) {
   });
   fill(el,
     h('div', { class: `status ${st.tone}` }, h('span', { class: 'spinner', 'aria-hidden': 'true' }), h('strong', {}, st.label), st.time && h('span', { class: 'timer' }, st.time), st.detail && h('div', { class: 'detail' }, st.detail)),
+    workers.length ? h('div', { class: 'workers' }, h('h2', {}, 'Workers'), h('ul', {}, workers)) : null,
     rows.length ? h('ol', { class: 'rows' }, rows) : h('p', { class: 'empty' }, 'Nothing yet. What Claude is doing will show here.'));
 }
 

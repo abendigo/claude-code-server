@@ -98,7 +98,7 @@ if (cfg.agentUrl && params.get('agent') !== '0') {
   window.__vr_login = login;
   focusables.push(convo);
   add(convo, LAYOUT.conversation, { id: 'claude', title: 'Claude', closable: false });
-  const activity = new ActivityPanel({ getConversation: () => convo.convo, widthM: LAYOUT.activity.widthM });
+  const activity = new ActivityPanel({ getConversation: () => convo.convo, widthM: LAYOUT.activity.widthM, client: convo.client });
   convo.listeners.add(() => activity.markDirty());
   add(activity, LAYOUT.activity, { id: 'activity', title: 'Activity' });
   // The Sessions window is opened from the Claude header; whether it is open is remembered.

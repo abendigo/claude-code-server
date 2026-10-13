@@ -151,6 +151,9 @@ export class AgentClient {
 
   closeSession(session) { return this.send({ type: 'close_session', session }); }
 
+  // Stop one background worker; the session itself carries on.
+  stopTask(task) { return this.send({ type: 'stop_task', task }); }
+
   send(obj, { quiet = false } = {}) {
     if (!obj) return false;
     if (!this.open) {

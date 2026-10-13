@@ -62,6 +62,7 @@ export class Session {
     this.firstPrompt = '';
     this.lastActivity = now();
     this.authFailed = false;
+    this.tasks = new Map(); // background workers: task id -> {id, description, status, startedAt, endedAt, last, summary}
     this.legacy = false; // made by a page that never asked to attach: ends with its page, as the old bridge did
     // A resumed session starts from its transcript; attach waits for this.
     this.ready = resume ? this.loadTranscript() : Promise.resolve();
@@ -79,10 +80,13 @@ export class Session {
   }
 
   get live() { return Boolean(this.query); }
-  get busy() { return this.state === 'working' || this.state === 'waiting'; }
+  get running() { return [...this.tasks.values()].filter((t) => t.status === 'running'); }
+
+  // Working, waiting for an answer, or with a background worker still going: not safe to stop the container.
+  get busy() { return this.state === 'working' || this.state === 'waiting' || this.running.length > 0; }
 
   info() {
-    return { id: this.id, sdkId: this.sdkId, cwd: this.cwd, state: this.state, live: this.live, firstPrompt: this.firstPrompt, lastActivity: this.lastActivity, viewers: this.viewers.size };
+    return { id: this.id, sdkId: this.sdkId, cwd: this.cwd, state: this.state, live: this.live, firstPrompt: this.firstPrompt, lastActivity: this.lastActivity, viewers: this.viewers.size, workers: this.running.length };
   }
 
   // ---- viewers ---------------------------------------------------------------
@@ -104,7 +108,7 @@ export class Session {
 
   // What a viewer needs when it starts following: the past, then approvals still waiting.
   catchUp(viewer) {
-    viewer.send({ type: 'attached', session: this.id, sdkId: this.sdkId, cwd: this.cwd, state: this.state, live: this.live });
+    viewer.send({ type: 'attached', session: this.id, sdkId: this.sdkId, cwd: this.cwd, state: this.state, live: this.live, tasks: this.taskList() });
     viewer.send({ type: 'history', messages: this.history });
     for (const p of this.pending.values()) viewer.send(p.request);
   }
@@ -174,6 +178,9 @@ export class Session {
         settingSources: this.env.settingSources,
         systemPrompt: { type: 'preset', preset: 'claude_code', ...(this.env.systemPromptAppend ? { append: this.env.systemPromptAppend } : {}) },
         permissionMode: this.env.permissionMode,
+        // Background workers: Stop ends the turn only, a worker is stopped on its own (stopTask).
+        perTaskStopAffordance: true,
+        ...(this.env.workers ? { agents: { worker: this.env.workers } } : {}),
         ...(this.env.permissionMode === 'bypassPermissions' ? { allowDangerouslySkipPermissions: true } : {}),
         canUseTool: this.canUseTool,
         stderr: (s) => this.logFn(s.trimEnd()),
@@ -189,6 +196,10 @@ export class Session {
         if (this.query !== query) return; // stopped or replaced
         if (message.type === 'system' && message.subtype === 'init' && message.session_id) this.sdkId = message.session_id;
         this.lastActivity = this.now();
+        // A finished worker wakes an idle session by itself: when it starts answering, it is working.
+        // (A worker's own messages carry parent_tool_use_id and say nothing about the main session.)
+        if (this.state === 'idle' && !message.parent_tool_use_id && (message.type === 'assistant' || message.type === 'stream_event' || (message.type === 'system' && message.subtype === 'init'))) this.setState('working');
+        if (message.type === 'system') this.trackTask(message);
         const wrapped = { type: 'sdk', message };
         this.broadcast(wrapped);
         if (message.type !== 'stream_event') this.record({ ...wrapped, at: this.lastActivity });
@@ -208,6 +219,51 @@ export class Session {
     this.end();
   }
 
+  // ---- background workers ------------------------------------------------------
+  // The SDK reports a worker starting, progressing and finishing, plus the live set
+  // whenever it changes; the live set is the authority, so a missed message cannot
+  // leave a worker showing as running forever. Only subagents count as workers: the
+  // shell commands a worker runs show up as tasks too, and a dev server left running
+  // in the background must not keep the container from ever being stopped.
+  trackTask(m) {
+    const now = this.now();
+    let changed = false;
+    if (m.subtype === 'task_started' && m.is_backgrounded && m.task_type === 'local_agent' && !m.skip_transcript) {
+      this.tasks.set(m.task_id, { id: m.task_id, description: m.description ?? '', kind: m.task_type ?? '', status: 'running', startedAt: now, endedAt: null, last: '', summary: '' });
+      changed = true;
+    } else if (m.subtype === 'task_progress') {
+      const t = this.tasks.get(m.task_id);
+      if (t) { t.last = m.summary || m.last_tool_name || t.last; changed = true; }
+    } else if (m.subtype === 'task_notification' && !m.ambient) {
+      const t = this.tasks.get(m.task_id);
+      // The live set can arrive before the notification, and only guesses "completed": the notification has the truth.
+      if (t && (t.status === 'running' || t.guessed)) { t.status = m.status; t.endedAt = now; t.summary = m.summary ?? ''; t.guessed = false; changed = true; }
+    } else if (m.subtype === 'background_tasks_changed') {
+      const live = new Map((m.tasks ?? []).filter((t) => t.type === 'subagent').map((t) => [t.id, t]));
+      for (const t of this.tasks.values()) if (t.status === 'running' && !live.has(t.id)) { t.status = 'completed'; t.guessed = true; t.endedAt = now; changed = true; }
+      for (const [id, t] of live) if (!this.tasks.has(id)) { this.tasks.set(id, { id, description: t.description ?? '', kind: t.type ?? '', status: 'running', startedAt: now, endedAt: null, last: '', summary: '' }); changed = true; }
+    }
+    if (changed) this.sendTasks();
+  }
+
+  // Running first, then the last few that finished.
+  taskList() {
+    const all = [...this.tasks.values()];
+    const done = all.filter((t) => t.status !== 'running').sort((a, b) => b.endedAt - a.endedAt).slice(0, 5);
+    return [...all.filter((t) => t.status === 'running').sort((a, b) => a.startedAt - b.startedAt), ...done];
+  }
+
+  sendTasks() {
+    this.broadcast({ type: 'tasks', session: this.id, tasks: this.taskList() });
+    this.onState(this, this.state); // the idle-stop and the legacy rule look at busy, which just changed
+  }
+
+  stopTask(id) {
+    if (this.tasks.get(id)?.status !== 'running') return false;
+    this.query?.stopTask(id).catch((e) => this.logFn('stopTask failed', e.message));
+    return true;
+  }
+
   cancelPending() {
     for (const [id, p] of this.pending) { p.resolve({ behavior: 'deny', message: 'Cancelled' }); this.broadcast({ type: 'permission_cancelled', id }); }
     this.pending.clear();
@@ -218,6 +274,7 @@ export class Session {
     const query = this.query;
     this.query = null;
     this.cancelPending();
+    for (const t of this.tasks.values()) if (t.status === 'running') { t.status = 'stopped'; t.endedAt = this.now(); }
     this.inbox?.close();
     this.inbox = null;
     try { query?.close(); } catch { /* already gone */ }

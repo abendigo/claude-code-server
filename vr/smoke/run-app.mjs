@@ -26,6 +26,7 @@ class FakeWS {
 globalThis.WebSocket = FakeWS;
 
 const errors = [];
+setTimeout(() => { console.log('FAIL  timed out'); process.exit(1); }, 25_000).unref(); // never hang the caller
 process.on('unhandledRejection', (e) => errors.push('unhandled: ' + (e?.stack || e)));
 process.on('uncaughtException', (e) => errors.push('uncaught: ' + (e?.stack || e)));
 const ok = (name, cond, extra = '') => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${name} ${extra}`); if (!cond) errors.push('failed: ' + name); };
@@ -76,6 +77,16 @@ ok('Allow sends the answer', ws().sent.some((m) => m.type === 'permission' && m.
 const other = byClass(els.sessions, 'pick').find((b) => b.textContent.includes('Plan the service'));
 other.click();
 ok('picking another session attaches to it', ws().sent.at(-1).type === 'attach' && ws().sent.at(-1).session === 'svc2');
+
+// A background worker runs: the session is free, the pane lists it, and Stop takes two taps.
+ws().emit({ type: 'tasks', session: 'svc1', tasks: [{ id: 'w1', description: 'Run the long build', status: 'running', startedAt: Date.now() - 5000, endedAt: null, last: 'Bash', summary: '' }] });
+await sleep(30);
+ok('a running worker is listed in the Activity pane', els.activity.textContent.includes('Run the long build') && els.activity.textContent.includes('using Bash'));
+button(els.activity, 'Stop').click();
+await sleep(30); // the redraw happens on the next frame
+ok('the first tap on Stop only arms it', !ws().sent.some((m) => m.type === 'stop_task') && button(els.activity, 'Stop?') !== undefined);
+button(els.activity, 'Stop?').click();
+ok('the second tap stops the worker', ws().sent.some((m) => m.type === 'stop_task' && m.task === 'w1'));
 
 // The connection drops and returns.
 const before = sockets.length;

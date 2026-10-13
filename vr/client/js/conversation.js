@@ -85,6 +85,7 @@ export class Conversation {
     this.turnEnded = null;
     this.attach = null; // the session being followed, from the session service: {session, sdkId, cwd}
     this.sessions = []; // the list the service last sent: see the Sessions window
+    this.tasks = []; // background workers: running first, then the last few finished (from the service)
     this.curMsgId = null;
     this.openText = new Map(); // stream index -> block, for the message being streamed
     this.pending = null; // the permission block awaiting an answer
@@ -146,12 +147,15 @@ export class Conversation {
         this.last = null;
         this.turnStarted = null;
         this.turnEnded = null;
+        this.tasks = msg.tasks ?? [];
         this.state = msg.state === 'working' || msg.state === 'waiting' ? msg.state : 'idle';
         this.status = '';
         break;
       case 'history': this.loadHistory(msg.messages ?? []); break;
       case 'session_state': // the session changed state, perhaps because of another viewer
         if (this.attach && msg.session === this.attach.session && this.state !== 'offline' && this.state !== 'connecting') {
+          // A worker finishing wakes an idle session with nobody typing: that turn starts now.
+          if (msg.state === 'working' && this.state === 'idle') { this.turnStarted = this.now(); this.turnEnded = null; }
           if (msg.state === 'idle' || msg.state === 'working') { if (!this.pending) this.state = msg.state; } else if (msg.state === 'waiting' && this.pending) this.state = 'waiting';
         }
         break;
@@ -164,6 +168,7 @@ export class Conversation {
         this.state = 'working';
         break;
       case 'sessions': this.sessions = Array.isArray(msg.list) ? msg.list : []; break;
+      case 'tasks': if (!this.attach || msg.session === this.attach.session) this.tasks = Array.isArray(msg.tasks) ? msg.tasks : []; break;
       case 'permission_cancelled':
         for (const b of this.blocks) if (b.kind === 'permission' && b.id === msg.id) b.status = 'cancelled';
         if (this.pending?.id === msg.id) { this.pending = null; this.state = 'working'; }

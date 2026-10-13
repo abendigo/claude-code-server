@@ -76,6 +76,17 @@
   .status strong, .status .timer { color: inherit; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .status.working .spinner { animation: none; } }
+  .workers { padding: 8px 10px 0; border-bottom: 1px solid var(--line); }
+  .workers h2 { padding: 4px 4px 2px; font-size: 12.5px; }
+  .workers ul { list-style: none; margin: 0; padding: 0 0 8px; }
+  .worker { display: flex; gap: 8px; align-items: center; padding: 4px; }
+  .worker .mark { width: 10px; height: 10px; border-radius: 50%; background: var(--amber); flex: none; }
+  .worker.completed .mark { background: var(--green); } .worker.failed .mark, .worker.stopped .mark { background: var(--red); }
+  .worker .what { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .worker .name { word-break: break-word; } .worker.completed .name, .worker.stopped .name, .worker.failed .name { color: var(--dim); }
+  .worker .sub { font: 12.5px ui-monospace, Menlo, monospace; color: var(--dim); word-break: break-word; }
+  .worker .time { font: 13px ui-monospace, Menlo, monospace; color: var(--dim); }
+  .worker .stop { padding: 3px 10px; font-size: 13px; } .worker .stop.armed { background: #8a2f2f; }
   ol.rows { list-style: none; margin: 0; padding: 6px 10px; font: 13.5px ui-monospace, Menlo, monospace; }
   ol.rows li { display: flex; gap: 8px; padding: 2px 0; align-items: baseline; }
   ol.rows .turn { color: #9ec9ff; background: var(--user); padding: 3px 8px; border-radius: 6px; margin: 6px 0; display: block; }
