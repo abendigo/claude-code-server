@@ -14,13 +14,14 @@
 //     {type:'list_sessions'}
 //     {type:'close_session', session}           end a session for good
 //     {type:'prompt', text, cwd?, resume?}      a message to the session being followed
-//     {type:'permission', id, allow, always?} / {type:'interrupt'}
+//     {type:'permission', id, allow, always?} / {type:'interrupt'} / {type:'stop_task', task}   stop one background worker
 //     {type:'login_start'} / {type:'login_code', code} / {type:'login_cancel'}
 //   service -> page
 //     {type:'attached', session, sdkId, cwd, state, live}
 //     {type:'history', messages}                what happened so far, oldest first
 //     {type:'sessions', list}
 //     {type:'session_state', session, state}   idle | working | waiting
+//     {type:'tasks', session, tasks}            the background workers: running first, then the last few finished
 //     {type:'user_prompt', text, at}            a message typed in another viewer
 //     {type:'sdk', message} / {type:'permission_request', ...} / {type:'permission_cancelled', id}
 //     {type:'error', message} / {type:'auth_required'} / {type:'login_url'} / {type:'login_result'} / {type:'closed', session}
@@ -42,6 +43,17 @@ const IDLE_STOP_MS = Number(process.env.AGENT_IDLE_STOP_MS || 30 * 60_000);
 const SWEEP_MS = Number(process.env.AGENT_SWEEP_MS || 60_000);
 const MAX_LIST = 30;
 const PIDFILE = path.join(STATE_DIR, 'service.pid');
+
+// Background workers: slow jobs are handed to a worker so the main session stays free to talk.
+// AGENT_WORKERS=0 turns it off; AGENT_WORKER_MODEL picks the workers' model (default: the main one).
+const WORKERS = process.env.AGENT_WORKERS !== '0';
+export const WORKERS_PROMPT = [
+  'For work that will take more than a few seconds (running a build or the tests, searching or editing many files, research),',
+  'hand it to the `worker` agent with the Agent tool instead of doing it yourself, then answer the user straight away in one short sentence',
+  'saying what you started, so they can keep talking to you. Run at most four workers at a time.',
+  'When a worker finishes you will be told; then tell the user the result in one or two sentences.',
+  'Quick questions and small edits you do yourself. Anything a worker needs from the user, you ask, not the worker.',
+].join(' ');
 
 // The user may be in a headset and hears a short spoken version of each reply
 // (the VR client strips this tag from the text it shows). AGENT_SPOKEN=0 turns it off.
@@ -80,7 +92,13 @@ const env = {
   home: HOME,
   autoAllow: (process.env.AGENT_AUTO_ALLOW || 'Read,Glob,Grep,TodoWrite').split(',').filter(Boolean),
   settingSources: (process.env.AGENT_SETTING_SOURCES ?? 'user,project,local').split(',').filter(Boolean),
-  systemPromptAppend: SPOKEN_PROMPT,
+  systemPromptAppend: [SPOKEN_PROMPT, WORKERS ? WORKERS_PROMPT : ''].filter(Boolean).join(' '),
+  workers: WORKERS ? {
+    description: 'Does a slow job in the background (builds, tests, bulk edits, research) and reports the result in one short sentence.',
+    prompt: 'You are a background worker. Do exactly what you are asked, then reply with one short sentence saying what you did and the result.',
+    background: true,
+    model: process.env.AGENT_WORKER_MODEL || 'inherit',
+  } : null,
   permissionMode: process.env.AGENT_PERMISSION_MODE || 'default',
 };
 
@@ -169,6 +187,7 @@ class Viewer {
       }
       case 'permission': this.session?.answer(msg.id, Boolean(msg.allow), Boolean(msg.always)); break;
       case 'interrupt': this.session?.interrupt(); break;
+      case 'stop_task': if (typeof msg.task === 'string') this.session?.stopTask(msg.task); break;
       case 'login_start': loginFlow.start((m) => this.send(m)); break;
       case 'login_code': loginFlow.code(msg.code); break;
       case 'login_cancel': loginFlow.cancel(); break;
@@ -182,7 +201,7 @@ async function listSessions() {
   const known = [...sessions.values()];
   const rows = known.map((s) => ({
     session: s.id, sdkId: s.sdkId, cwd: s.cwd, summary: s.firstPrompt, lastModified: s.lastActivity,
-    state: s.live || s.state !== 'idle' ? s.state : 'dormant', live: s.live, viewers: s.viewers.size,
+    state: s.live || s.state !== 'idle' ? s.state : 'dormant', live: s.live, viewers: s.viewers.size, workers: s.running.length,
   }));
   try {
     for (const info of await sdk.listSessions({ limit: MAX_LIST })) {

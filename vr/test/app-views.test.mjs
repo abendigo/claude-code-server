@@ -169,3 +169,27 @@ test('actions: send, answer, stop', () => {
   stopWork(client);
   assert.deepEqual(sent.at(-1), { type: 'interrupt' });
 });
+
+test('workers: listed under the status with time and what they are doing; Stop takes two taps in the app', () => {
+  const c = new Conversation({ now: () => NOW });
+  c.handle({ type: 'attached', session: 's1', sdkId: 'k1', cwd: '/workspace', state: 'idle', tasks: [
+    { id: 'w1', description: 'Run the tests', status: 'running', startedAt: NOW - 90_000, endedAt: null, last: 'Bash', summary: '' },
+    { id: 'w2', description: 'Lint everything', status: 'completed', startedAt: NOW - 60_000, endedAt: NOW - 30_000, last: '', summary: 'Lint passed' },
+    { id: 'w3', description: 'Build', status: 'stopped', startedAt: NOW - 60_000, endedAt: NOW - 20_000, last: '', summary: '' },
+  ] });
+  const el = box();
+  const stopped = [];
+  renderActivity(el, c, NOW, { onStopTask: (id) => stopped.push(id), armedTask: null });
+  assert.match(el.textContent, /Workers/);
+  assert.match(el.textContent, /Run the tests.*using Bash.*1m 30s/);
+  assert.match(el.textContent, /Lint passed/);
+  assert.match(el.textContent, /1 worker running/, 'the status line says Ready with one worker running');
+  assert.deepEqual(byClass(el, 'worker').map((e) => e.className), ['worker running', 'worker completed', 'worker stopped']);
+  assert.equal(byClass(el, 'stop').length, 1, 'only the running one has Stop');
+  button(el, 'Stop').click();
+  assert.deepEqual(stopped, ['w1']);
+  renderActivity(el, c, NOW, { onStopTask() {}, armedTask: 'w1' });
+  assert.equal(byClass(el, 'armed')[0].textContent, 'Stop?');
+  renderActivity(el, new Conversation(), NOW, { onStopTask() {} });
+  assert.equal(byClass(el, 'workers').length, 0, 'no workers, no section');
+});

@@ -34,6 +34,8 @@ const docs = new Map(); // id -> {title, text}
 let selectedDoc = null;
 let armed = null; // session whose End was tapped once
 let armedTimer = null;
+let armedTask = null; // worker whose Stop was tapped once
+let armedTaskTimer = null;
 let wasWorking = false;
 
 const log = $('log');
@@ -58,7 +60,17 @@ function draw() {
       render();
     },
   });
-  renderActivity($('activity'), convo, now);
+  renderActivity($('activity'), convo, now, {
+    armedTask,
+    onStopTask: (id) => {
+      if (armedTask === id) { armedTask = null; client.stopTask(id); } else {
+        armedTask = id;
+        clearTimeout(armedTaskTimer);
+        armedTaskTimer = setTimeout(() => { armedTask = null; render(); }, 3000);
+      }
+      render();
+    },
+  });
   renderDocs($('docs'), docs, selectedDoc, { onSelect: (id) => { selectedDoc = id; render(); } });
 
   const label = stateLabel(convo);
@@ -84,7 +96,7 @@ render = () => {
 };
 
 // While Claude works the timers tick; otherwise there is nothing to animate.
-setInterval(() => { if (convo.state === 'working' || convo.state === 'waiting') render(); }, 1000);
+setInterval(() => { if (convo.state === 'working' || convo.state === 'waiting' || convo.tasks.some((t) => t.status === 'running')) render(); }, 1000);
 // Ages in the Sessions list, and the list itself.
 const refreshSoon = () => setTimeout(() => client.listSessions(), 300);
 setInterval(() => { if (client.open) client.listSessions(); }, 5000);

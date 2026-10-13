@@ -339,6 +339,116 @@ withService('a client that vanishes with unread data (a connection reset) does n
   assert.equal((await b.next('attached')).session, session);
 });
 
+// ---- background workers ------------------------------------------------------------------
+const tasksMsg = (m) => m.type === 'tasks';
+const running = (m) => m.type === 'tasks' && m.tasks.some((t) => t.status === 'running');
+
+withService('the service offers the SDK a background worker, keeps Stop to the turn, and tells Claude to delegate', async (svc) => {
+  const a = await svc.connect();
+  a.send({ type: 'attach' });
+  await a.next('attached');
+  a.send({ type: 'prompt', text: 'options?' });
+  const o = JSON.parse(text(await a.next(reply)));
+  assert.deepEqual(o, { worker: true, background: true, stopAffordance: true, mentionsWorkers: true });
+});
+
+withService('AGENT_WORKERS=0 turns workers off', async (svc) => {
+  const a = await svc.connect();
+  a.send({ type: 'attach' });
+  await a.next('attached');
+  a.send({ type: 'prompt', text: 'options?' });
+  const o = JSON.parse(text(await a.next(reply)));
+  assert.equal(o.worker, false);
+  assert.equal(o.mentionsWorkers, false);
+}, { AGENT_WORKERS: '0' });
+
+withService('a worker runs while the session is free; the service stays busy; the session wakes by itself when it finishes', async (svc) => {
+  const a = await svc.connect();
+  a.send({ type: 'attach' });
+  await a.next('attached');
+  await a.next('history');
+  a.send({ type: 'prompt', text: 'bg:900 build the thing' });
+  const started = await a.next(running);
+  assert.deepEqual(started.tasks.map((t) => [t.description, t.status]), [['build the thing', 'running']]);
+  assert.equal(text(await a.next(reply)), 'started build the thing', 'the main session answers at once');
+  assert.equal((await a.next((m) => m.type === 'session_state' && m.state === 'idle')).state, 'idle', 'and is free to talk');
+  assert.equal(svc.busy(), 0, 'but the service is busy: a worker is running');
+
+  // The worker finishes later; nobody typed anything.
+  const woke = await a.next((m) => m.type === 'session_state' && m.state === 'working');
+  assert.equal(woke.state, 'working', 'the session is seen working again');
+  assert.equal(text(await a.next(reply)), 'build the thing finished');
+  assert.equal((await a.next((m) => m.type === 'session_state' && m.state === 'idle')).state, 'idle');
+  // (the live set arrives first and only guesses "completed"; the notification then supplies the summary)
+  const done = (await a.next((m) => tasksMsg(m) && m.tasks.length && m.tasks.every((t) => t.status !== 'running' && t.summary)));
+  assert.deepEqual(done.tasks.map((t) => [t.description, t.status]), [['build the thing', 'completed']]);
+  assert.match(done.tasks[0].summary, /completed/);
+  await sleep(100);
+  assert.equal(svc.busy(), 1, 'nothing left to protect');
+});
+
+withService('a viewer that attaches while a worker runs sees it, and its progress', async (svc) => {
+  const a = await svc.connect();
+  a.send({ type: 'attach' });
+  const { session } = await a.next('attached');
+  a.send({ type: 'prompt', text: 'bg:1500 long job' });
+  await a.next(running);
+  const b = await svc.connect();
+  b.send({ type: 'attach', session });
+  const at = await b.next('attached');
+  assert.deepEqual(at.tasks.map((t) => [t.description, t.status]), [['long job', 'running']]);
+  assert.equal(at.tasks[0].last, 'Bash', 'the last tool it used');
+});
+
+withService('stop_task stops one worker; the notification (not the live set) decides it is "stopped"; the session says so', async (svc) => {
+  const a = await svc.connect();
+  a.send({ type: 'attach' });
+  await a.next('attached');
+  a.send({ type: 'prompt', text: 'bg:60000 endless' });
+  const { tasks } = await a.next(running);
+  await a.next(reply);
+  a.send({ type: 'stop_task', task: 'nope' }); // unknown ids are ignored
+  a.send({ type: 'stop_task', task: tasks[0].id });
+  const stopped = await a.next((m) => tasksMsg(m) && m.tasks.some((t) => t.status === 'stopped'));
+  assert.equal(stopped.tasks[0].status, 'stopped');
+  assert.match(text(await a.next(reply)), /was stopped/, 'the woken session tells you');
+  assert.ok(!a.seen.some((m) => reply(m) && /finished/.test(text(m))), 'and it did not finish');
+  await a.next((m) => m.type === 'session_state' && m.state === 'idle');
+  assert.equal(svc.busy(), 1);
+});
+
+withService('a running worker keeps an unwatched session alive past the idle shutdown', async (svc) => {
+  const a = await svc.connect();
+  a.send({ type: 'attach' });
+  const { session } = await a.next('attached');
+  a.send({ type: 'prompt', text: 'bg:1500 slow build' });
+  await a.next(reply);
+  a.send({ type: 'detach' });
+  await sleep(600); // well past the 200 ms idle shutdown
+  a.send({ type: 'list_sessions' });
+  const row = (await a.next('sessions')).list.find((r) => r.session === session);
+  assert.equal(row.live, true, 'still running');
+  assert.equal(row.workers, 1);
+  await sleep(1200); // the worker finishes; once the session is idle and unwatched again it may be shut down
+  a.send({ type: 'list_sessions' });
+  assert.equal((await a.next('sessions')).list.find((r) => r.session === session).workers, 0);
+}, { AGENT_IDLE_STOP_MS: '200', AGENT_SWEEP_MS: '100' });
+
+withService('an old-style page that leaves while a worker runs does not lose it; the session ends when the worker has reported', async (svc) => {
+  const v = await svc.connect();
+  v.send({ type: 'prompt', text: 'bg:700 chore' });
+  await v.next(reply);
+  await v.next((m) => m.type === 'session_state' && m.state === 'idle');
+  v.close();
+  await sleep(150);
+  const ok = await svc.connect();
+  ok.send({ type: 'list_sessions' });
+  assert.equal((await ok.next('sessions')).list.filter((r) => r.session).length, 1, 'kept for its worker');
+  await sleep(1100);
+  ok.send({ type: 'list_sessions' });
+  assert.equal((await ok.next('sessions')).list.filter((r) => r.session).length, 0, 'gone once everything finished');
+});
+
 test('busy says no when no service is running', () => {
   const svc = sandbox();
   try { assert.equal(svc.busy(), 1); } finally { svc.cleanup(); }

@@ -4,7 +4,7 @@
 // No output and no file contents: if you want those, ask. Scrolls like the
 // conversation (onScroll(amount); 0 follows new rows).
 import { Panel, roundRect } from './panel.js';
-import { activityRows, headerStatus, fmtDuration } from './activity.js';
+import { activityRows, backgroundRows, headerStatus, fmtDuration } from './activity.js';
 
 const SANS = 'ui-sans-serif, system-ui, sans-serif';
 const MONO = 'ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace';
@@ -15,15 +15,24 @@ const TURN_H = 62;
 const TONE = { working: '#7fb6ff', waiting: '#ffcc66', idle: '#98c379', connecting: '#e5c07b', offline: '#ff8a8a' };
 const MARK = { running: '#e5c07b', ok: '#98c379', error: '#ff8a8a' };
 const REDRAW_MS = 200; // while Claude is working, the timer and spinner move this often
+const WORKER_H = 76; // one background worker
+const WORKERS_TITLE_H = 46;
+const MAX_WORKERS_SHOWN = 6;
+const CONFIRM_MS = 3000; // a second tap on Stop within this long stops the worker
 
 export class ActivityPanel extends Panel {
   // getConversation: () => the Conversation model (or null before it exists).
-  constructor({ getConversation, widthM = 0.8, clock = Date.now }) {
+  // client (optional): {stopTask(id)}, for the Stop button on a running worker.
+  constructor({ getConversation, widthM = 0.8, clock = Date.now, client = null }) {
     const pxW = 960;
     const pxH = 1100;
     super({ widthM, heightM: (widthM * pxH) / pxW, pxW, pxH, name: 'activity' });
     this.getConversation = getConversation;
     this.clock = clock;
+    this.client = client;
+    this.spots = [];
+    this.hoverSpot = null;
+    this.armed = null; // {id, until}: a worker whose Stop was tapped once
     this.scroll = 0; // pixels scrolled up from the bottom; 0 follows new rows
     this.lastDraw = 0;
   }
@@ -33,11 +42,77 @@ export class ActivityPanel extends Panel {
     this.markDirty();
   }
 
-  // Keep the spinner and timer moving while there is something to watch.
+  // Keep the spinner and timers moving while there is something to watch.
   update() {
     const c = this.getConversation();
-    if (c && (c.state === 'working' || c.state === 'waiting') && this.clock() - this.lastDraw >= REDRAW_MS) this.markDirty();
+    const busy = c && (c.state === 'working' || c.state === 'waiting' || (c.tasks ?? []).some((t) => t.status === 'running'));
+    if (busy && this.clock() - this.lastDraw >= REDRAW_MS) this.markDirty();
+    if (this.armed && this.clock() > this.armed.until) { this.armed = null; this.markDirty(); }
     super.update();
+  }
+
+  spotAt(h) {
+    if (!h) return null;
+    const x = h.u * this.pxW;
+    const y = h.v * this.pxH;
+    return this.spots.find((s) => x >= s.x && x < s.x + s.w && y >= s.y && y < s.y + s.h) ?? null;
+  }
+
+  setHover(uv) {
+    super.setHover(uv);
+    const s = this.spotAt(this.hover);
+    if (s !== this.hoverSpot) { this.hoverSpot = s; this.markDirty(); }
+  }
+
+  onClick(h) { this.spotAt(h)?.act(); }
+
+  // Stop on a worker takes two taps within a few seconds, so a stray tap cannot end its work.
+  tapStop(id) {
+    if (this.armed?.id === id && this.clock() <= this.armed.until) { this.armed = null; this.client?.stopTask(id); } else this.armed = { id, until: this.clock() + CONFIRM_MS };
+    this.markDirty();
+  }
+
+  // The background workers, under the status line. Returns how much height they took.
+  drawWorkers(ctx, c, now, w, y0) {
+    const rows = backgroundRows(c, now);
+    this.spots = [];
+    if (!rows.length) return 0;
+    const shown = rows.slice(0, MAX_WORKERS_SHOWN);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#7d8da2';
+    ctx.font = `600 24px ${SANS}`;
+    ctx.fillText(`WORKERS${rows.length > shown.length ? `  (+${rows.length - shown.length} more)` : ''}`, PAD, y0 + WORKERS_TITLE_H / 2 + 4);
+    shown.forEach((r, i) => {
+      const y = y0 + WORKERS_TITLE_H + i * WORKER_H;
+      const cy = y + 24;
+      this.mark(ctx, r.status === 'running' ? 'running' : r.status === 'completed' ? 'ok' : 'error', PAD, cy, now);
+      const time = r.ms === null ? '' : fmtDuration(r.ms);
+      const stopW = r.status === 'running' && this.client ? 130 : 0;
+      ctx.font = `600 26px ${SANS}`;
+      ctx.fillStyle = r.status === 'running' ? '#e6edf5' : '#9fb0c4';
+      ctx.textAlign = 'left';
+      ctx.fillText(this.fit(ctx, r.text, w - PAD * 2 - 52 - stopW - (time ? 110 : 0)), PAD + 50, cy);
+      if (time) { ctx.font = `24px ${MONO}`; ctx.fillStyle = '#7d8da2'; ctx.textAlign = 'right'; ctx.fillText(time, w - PAD - stopW - 8, cy); ctx.textAlign = 'left'; }
+      ctx.font = `22px ${MONO}`;
+      ctx.fillStyle = '#7d8da2';
+      const sub = r.status === 'running' ? (r.last ? `using ${r.last}` : 'starting') : r.status === 'completed' ? (r.summary || 'finished') : r.status;
+      ctx.fillText(this.fit(ctx, sub, w - PAD * 2 - 50), PAD + 50, y + 56);
+      if (stopW) {
+        const armed = this.armed?.id === r.id;
+        const spot = { x: w - PAD - stopW + 4, y: y + 2, w: stopW - 8, h: 44, act: () => this.tapStop(r.id) };
+        this.spots.push(spot);
+        ctx.fillStyle = armed ? '#8a2f2f' : this.hoverSpot === spot ? '#2d3f57' : '#1d2733';
+        roundRect(ctx, spot.x, spot.y, spot.w, spot.h, 12);
+        ctx.fill();
+        ctx.fillStyle = '#e6edf5';
+        ctx.font = `600 24px ${SANS}`;
+        ctx.textAlign = 'center';
+        ctx.fillText(armed ? 'Stop?' : 'Stop', spot.x + spot.w / 2, spot.y + spot.h / 2 + 1);
+        ctx.textAlign = 'left';
+      }
+    });
+    return WORKERS_TITLE_H + shown.length * WORKER_H + 8;
   }
 
   // Vector marks: a headset's fonts can't be trusted to have tick or cross glyphs.
@@ -100,9 +175,12 @@ export class ActivityPanel extends Panel {
     ctx.font = `28px ${MONO}`;
     ctx.fillText(this.fit(ctx, st.detail, w - PAD * 2), PAD, 114);
 
+    // ---- background workers ---------------------------------------------------------
+    const workersH = this.drawWorkers(ctx, c, now, w, HEAD_H + 6);
+
     // ---- rows, newest at the bottom -------------------------------------------------
     const rows = activityRows(c, now);
-    const top = HEAD_H + 10;
+    const top = HEAD_H + 10 + workersH;
     const bottom = h - 16;
     const heights = rows.map((r) => (r.kind === 'turn' ? TURN_H : ROW_H));
     const total = heights.reduce((a, b) => a + b, 0);

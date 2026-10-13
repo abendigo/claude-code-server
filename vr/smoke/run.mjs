@@ -45,6 +45,7 @@ globalThis.__FakeRenderer = class {
 };
 
 const errors = [];
+setTimeout(() => { console.log('FAIL  timed out'); process.exit(1); }, 25_000).unref(); // never hang the caller
 process.on('unhandledRejection', (e) => errors.push('unhandled: ' + (e?.stack || e)));
 await import(here + '.build/client/js/main.js');
 await new Promise((r) => setTimeout(r, 60));

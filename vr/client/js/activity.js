@@ -15,21 +15,33 @@ const oneLine = (t, max) => {
   return s.length > max ? `${s.slice(0, max - 1)}…` : s;
 };
 
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// The background workers as rows: running first, with how long, then the last few that finished.
+export function backgroundRows(convo, now) {
+  return (convo.tasks ?? []).map((t) => ({
+    id: t.id, text: oneLine(t.description, 120), status: t.status, last: oneLine(t.last, 60), summary: oneLine(t.summary, 160),
+    ms: t.startedAt ? (t.endedAt ?? now) - t.startedAt : null,
+  }));
+}
+
 // The line at the top: what is happening right now, and for how long.
 export function headerStatus(convo, now) {
   const turn = convo.turnStarted ? now - convo.turnStarted : null;
+  const workers = (convo.tasks ?? []).filter((t) => t.status === 'running').length;
   const running = [...convo.blocks].reverse().find((b) => b.kind === 'tool' && b.status === 'running');
   switch (convo.state) {
     case 'working':
-      return { tone: 'working', label: 'Working', time: fmtDuration(turn), detail: running ? oneLine(running.summary, 90) : 'Thinking' };
+      return { tone: 'working', label: 'Working', time: fmtDuration(turn), detail: running ? oneLine(running.summary, 90) : 'Thinking', workers };
     case 'waiting':
-      return { tone: 'waiting', label: 'Needs your answer', time: fmtDuration(turn), detail: oneLine(convo.pending?.text.split('\n').slice(-1)[0], 90) };
+      return { tone: 'waiting', label: 'Needs your answer', time: fmtDuration(turn), detail: oneLine(convo.pending?.text.split('\n').slice(-1)[0], 90), workers };
     case 'idle': {
       const took = convo.turnStarted && convo.turnEnded ? fmtDuration(convo.turnEnded - convo.turnStarted) : '';
-      return { tone: 'idle', label: 'Ready', time: '', detail: took ? `Last turn took ${took}` : '' };
+      // Free to talk, even with workers going: that is the point of them.
+      return { tone: 'idle', label: 'Ready', time: '', detail: workers ? `${plural(workers, 'worker', 'workers')} running` : took ? `Last turn took ${took}` : '', workers };
     }
-    case 'connecting': return { tone: 'connecting', label: 'Connecting', time: '', detail: convo.status || '' };
-    default: return { tone: 'offline', label: 'Offline', time: '', detail: convo.status || '' };
+    case 'connecting': return { tone: 'connecting', label: 'Connecting', time: '', detail: convo.status || '', workers };
+    default: return { tone: 'offline', label: 'Offline', time: '', detail: convo.status || '', workers };
   }
 }
 
