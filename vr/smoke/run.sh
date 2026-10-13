@@ -5,3 +5,5 @@ cd "$(dirname "$0")"
 rm -rf .build && mkdir -p .build && cp -r ../client .build/client
 sed -i 's/new THREE.WebGLRenderer(/new globalThis.__FakeRenderer(/' .build/client/js/main.js
 node run.mjs
+echo '--- flat web app ---'
+node run-app.mjs

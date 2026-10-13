@@ -91,6 +91,15 @@ Everything in the VR scene (the conversation, voice bar, keyboard, quick keys, s
 
 A long reply that has just finished streaming opens at its first line (its end is the spoken summary), and a "more above" hint shows when the start of the conversation is out of view.
 
+### Flat web app
+
+`/vr/app.html` is the same Claude, in an ordinary web page for a laptop or phone: sessions on the left, the conversation in the middle with a text box (Enter sends, Shift+Enter for a new line), Allow / Always allow / Deny above it when Claude asks, and the Activity pane and any documents on the right. On a narrow screen it shows one pane at a time behind tabs. It talks to the same session service through the same connection code, so a session started in the headset shows up here and the other way round; several devices can follow one session at once, a prompt typed in one appears in the others, and an approval answered in one clears in the rest. It shares the browser's saved session with the VR page (`vr.agent.svc`).
+
+- **Never speaks.** Spoken replies are for VR only. The tab title says "Needs you" or "Done" while the tab is in the background.
+- **Microphone** (shown when the hub has a speech-to-text key): click Mic, talk, and it stops by itself after you stop; the text is sent, or answers an approval if you say "yes" / "no".
+- **Documents** from `windows.json` appear as tabs under Activity, rendered as markdown. `?tools=1` shows tool calls in the conversation too.
+- Code: `client/js/app/` (views, markdown to DOM, actions); everything else it uses is shared with the VR page (`conversation.js`, `agent-client.js`, `session-list.js`, `activity.js`, `markdown.js`). Text is only ever inserted as text, never as HTML.
+
 ```
 Quest page --wss /agent/ws--> gateway (agent-gateway, :7682) --docker exec -i--> agent-bridge (a thin relay)
                                                                                       |  unix socket

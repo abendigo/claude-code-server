@@ -6,6 +6,7 @@
 import { Panel, roundRect } from './panel.js';
 import { Conversation } from './conversation.js';
 import { AgentClient } from './agent-client.js';
+import { sessionStore } from './session-store.js';
 
 const SANS = 'ui-sans-serif, system-ui, sans-serif';
 const MONO = 'ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace';
@@ -16,24 +17,12 @@ const PERM_H = 330;
 const BODY = { font: `32px ${SANS}`, lh: 44 };
 const CODE = { font: `27px ${MONO}`, lh: 38 };
 const SESSION_KEY = 'vr.agent.session'; // the SDK's id of the session we were following
-const SERVICE_KEY = 'vr.agent.svc'; // the session service's own handle for it
 
 const store = {
   get() { try { return localStorage.getItem(SESSION_KEY); } catch { return null; } },
   set(v) { try { v ? localStorage.setItem(SESSION_KEY, v) : localStorage.removeItem(SESSION_KEY); } catch { /* optional */ } },
 };
-
-// Remembers which session this browser was following, so a reload goes back to it.
-export const sessionStore = {
-  read() { try { return { svc: localStorage.getItem(SERVICE_KEY), sdk: localStorage.getItem(SESSION_KEY) }; } catch { return {}; } },
-  write({ svc, sdk }) {
-    try {
-      svc ? localStorage.setItem(SERVICE_KEY, svc) : localStorage.removeItem(SERVICE_KEY);
-      sdk ? localStorage.setItem(SESSION_KEY, sdk) : localStorage.removeItem(SESSION_KEY);
-    } catch { /* optional */ }
-  },
-  clear() { this.write({}); },
-};
+export { sessionStore };
 
 // Break text into lines no wider than maxW. Words wrap; a single over-long
 // token (a path, a URL) is split by character so it can't overflow.
