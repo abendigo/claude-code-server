@@ -15,6 +15,7 @@ import { ToolGroup } from './tools.js';
 import { WindowManager, TitleBar } from './windows.js';
 import { MarkdownPanel } from './markdown-panel.js';
 import { ActivityPanel } from './activity-panel.js';
+import { SessionsPanel } from './sessions-panel.js';
 import { WindowFeed } from './window-feed.js';
 import { LoginFlow, LoginDialog } from './login.js';
 import { keyToSequence } from './keys.js';
@@ -75,7 +76,8 @@ const speaker = new Speaker({
   onChange: () => convo?.markDirty(),
   onError: (msg) => convo?.convo.notice(msg, 'error'),
 });
-speaker.hold = () => voice.recording;
+// Speech is for VR: stay quiet on a flat screen, and while the microphone is open.
+speaker.hold = () => voice.recording || !renderer.xr.isPresenting;
 // What this browser offers for speech, shown on the flat page so a silent headset can be diagnosed.
 {
   const yn = (v) => (v ? 'yes' : 'no');
@@ -99,6 +101,18 @@ if (cfg.agentUrl && params.get('agent') !== '0') {
   const activity = new ActivityPanel({ getConversation: () => convo.convo, widthM: LAYOUT.activity.widthM });
   convo.listeners.add(() => activity.markDirty());
   add(activity, LAYOUT.activity, { id: 'activity', title: 'Activity' });
+  // The Sessions window is opened from the Claude header; whether it is open is remembered.
+  const sessions = new SessionsPanel({ getConversation: () => convo.convo, client: convo.client, widthM: LAYOUT.sessions.widthM });
+  const sessionsWin = windows.add(sessions, { id: 'sessions', title: 'Sessions', placement: LAYOUT.sessions });
+  const wasOpen = (() => { try { return localStorage.getItem('vr.sessions.open') === '1'; } catch { return false; } })();
+  sessions.mesh.visible = wasOpen;
+  convo.onToggleSessions = () => {
+    sessions.mesh.visible = !sessions.mesh.visible;
+    try { localStorage.setItem('vr.sessions.open', sessions.mesh.visible ? '1' : '0'); } catch { /* optional */ }
+    if (sessions.mesh.visible) sessions.refresh();
+    convo.markDirty();
+  };
+  windows.onClose = (w) => { if (w === sessionsWin) { try { localStorage.setItem('vr.sessions.open', '0'); } catch { /* optional */ } } }; // closed with its own cross: stay closed
 }
 
 for (let i = 1; i <= termCount; i++) {

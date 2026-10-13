@@ -15,11 +15,24 @@ const INPUT_H = 120;
 const PERM_H = 330;
 const BODY = { font: `32px ${SANS}`, lh: 44 };
 const CODE = { font: `27px ${MONO}`, lh: 38 };
-const SESSION_KEY = 'vr.agent.session';
+const SESSION_KEY = 'vr.agent.session'; // the SDK's id of the session we were following
+const SERVICE_KEY = 'vr.agent.svc'; // the session service's own handle for it
 
 const store = {
   get() { try { return localStorage.getItem(SESSION_KEY); } catch { return null; } },
   set(v) { try { v ? localStorage.setItem(SESSION_KEY, v) : localStorage.removeItem(SESSION_KEY); } catch { /* optional */ } },
+};
+
+// Remembers which session this browser was following, so a reload goes back to it.
+export const sessionStore = {
+  read() { try { return { svc: localStorage.getItem(SERVICE_KEY), sdk: localStorage.getItem(SESSION_KEY) }; } catch { return {}; } },
+  write({ svc, sdk }) {
+    try {
+      svc ? localStorage.setItem(SERVICE_KEY, svc) : localStorage.removeItem(SERVICE_KEY);
+      sdk ? localStorage.setItem(SESSION_KEY, sdk) : localStorage.removeItem(SESSION_KEY);
+    } catch { /* optional */ }
+  },
+  clear() { this.write({}); },
 };
 
 // Break text into lines no wider than maxW. Words wrap; a single over-long
@@ -45,7 +58,7 @@ function wrap(ctx, text, maxW) {
 
 export class ConversationPanel extends Panel {
   // speaker (optional): says Claude's spoken summaries and approval requests aloud.
-  constructor({ agentUrl, cwd = '', widthM = 1.5, speaker = null, showTools = true }) {
+  constructor({ agentUrl, cwd = '', widthM = 1.5, speaker = null, showTools = true, attachTimeoutMs }) {
     const pxW = 1400;
     const pxH = 1100;
     super({ widthM, heightM: (widthM * pxH) / pxW, pxW, pxH, name: 'agent' });
@@ -66,11 +79,15 @@ export class ConversationPanel extends Panel {
       onChange: (c) => {
         this.lines = null;
         if (c.sessionId) store.set(c.sessionId);
+        // A long reply that has just finished streaming: show its start, not its end (the end is the spoken summary).
+        const done = c.blocks.find((b) => b.justFinished);
+        if (done) { done.justFinished = false; this.pendingJump = done; }
         this.markDirty();
         for (const f of this.listeners) f(c);
       },
     });
-    this.client = new AgentClient(agentUrl, this.convo);
+    this.pendingJump = null;
+    this.client = new AgentClient(agentUrl, this.convo, { cwd, store: sessionStore, ...(attachTimeoutMs ? { attachTimeoutMs } : {}) });
     this.client.connect();
   }
 
@@ -104,7 +121,8 @@ export class ConversationPanel extends Panel {
       return;
     }
     this.speaker?.stop();
-    const msg = this.convo.submit(t, { cwd: this.cwd, resume: this.resumeId });
+    // Only a worker without the session service needs the first prompt to say which session to resume.
+    const msg = this.convo.submit(t, { cwd: this.cwd, resume: this.client.legacy ? this.resumeId : undefined });
     if (this.client.send(msg)) this.resumeId = null; // only the first prompt carries it
     if (text === this.input) this.input = '';
     this.scroll = 0;
@@ -115,7 +133,7 @@ export class ConversationPanel extends Panel {
     this.speaker?.stop();
     this.resumeId = null;
     store.set(null);
-    this.client.connect();
+    this.client.newSession();
     this.scroll = 0;
   }
 
@@ -163,6 +181,7 @@ export class ConversationPanel extends Panel {
         push('You', { font: `600 24px ${SANS}`, lh: 34 }, { color: '#7fb6ff' });
         for (const l of wrap(ctx, b.text, width - 40)) push(l, BODY, { color: '#e6edf5', bg: '#16314d', indent: 20 });
       } else if (b.kind === 'assistant') {
+        const first = out.length;
         let code = false;
         for (const raw of b.text.split('\n')) {
           if (raw.trim().startsWith('```')) { code = !code; continue; }
@@ -178,6 +197,7 @@ export class ConversationPanel extends Panel {
             wrap(ctx, text, width - (bullet ? 40 : 0)).forEach((l, i) => push((bullet && i === 0 ? '• ' : bullet ? '  ' : '') + l, style, { color: '#e6edf5' }));
           }
         }
+        if (out.length > first) out[first].blockStart = b;
         if (b.streaming && out.length) out[out.length - 1].cursor = true;
       } else if (b.kind === 'tool') {
         if (!this.showTools) continue; // shown in the Activity window instead
@@ -262,7 +282,8 @@ export class ConversationPanel extends Panel {
     hb('▼', () => { this.scroll = 0; this.markDirty(); }, 70);
     hb('▲', () => this.onScroll(8), 70);
     hb('New', () => this.newConversation(), 100);
-    if (store.get() && c.state !== 'working') hb('Resume', () => this.resume(), 130);
+    if (this.client.legacy && store.get() && c.state !== 'working') hb('Resume', () => this.resume(), 130);
+    if (this.onToggleSessions) hb('Sessions', () => this.onToggleSessions(), 140);
     if (c.state === 'working' || waiting) hb('Stop', () => { this.speaker?.stop(); this.client.send({ type: 'interrupt' }); }, 100);
     if (this.speaker) {
       // While Claude is talking this is a Hush button; otherwise it switches spoken replies on or off.
@@ -275,7 +296,20 @@ export class ConversationPanel extends Panel {
     if (!this.lines) { ctx.font = BODY.font; this.lines = this.buildLines(ctx, w - PAD * 2); }
     const area = bottom - top - 10;
     const total = this.lines.reduce((s, l) => s + (l.gap ?? l.lh), 0);
+    if (this.pendingJump) { // a long reply just finished: put its first line at the top
+      const at = this.lines.findIndex((l) => l.blockStart === this.pendingJump);
+      this.pendingJump = null;
+      if (at >= 0) {
+        const heightOf = (l) => l.gap ?? l.lh;
+        const before = this.lines.slice(0, at).reduce((s, l) => s + heightOf(l), 0);
+        let end = this.lines.findIndex((l, i) => i > at && l.blockStart);
+        if (end < 0) end = this.lines.length;
+        const own = this.lines.slice(at, end).reduce((s, l) => s + heightOf(l), 0);
+        if (own > area * 0.7) this.scroll = Math.max(0, total - before - area + 10);
+      }
+    }
     this.scroll = Math.min(this.scroll, Math.max(0, total - area));
+    const hiddenAbove = total - area - this.scroll > 0;
     ctx.save();
     ctx.beginPath();
     ctx.rect(0, top, w, area + 10);
@@ -300,6 +334,13 @@ export class ConversationPanel extends Panel {
       y += l.lh;
     }
     ctx.restore();
+    if (hiddenAbove) {
+      ctx.fillStyle = 'rgba(77,163,255,0.9)';
+      ctx.font = `600 24px ${SANS}`;
+      ctx.textAlign = 'right';
+      ctx.fillText('▲ more above', w - PAD, top + 28);
+      ctx.textAlign = 'left';
+    }
     if (this.scroll > 0) {
       ctx.fillStyle = 'rgba(77,163,255,0.9)';
       ctx.font = `600 24px ${SANS}`;

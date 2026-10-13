@@ -83,6 +83,8 @@ export class Conversation {
     this.last = null; // {ms, cost} of the last finished turn
     this.turnStarted = null; // when you sent the current (or last) prompt, and when its turn ended
     this.turnEnded = null;
+    this.attach = null; // the session being followed, from the session service: {session, sdkId, cwd}
+    this.sessions = []; // the list the service last sent: see the Sessions window
     this.curMsgId = null;
     this.openText = new Map(); // stream index -> block, for the message being streamed
     this.pending = null; // the permission block awaiting an answer
@@ -133,6 +135,35 @@ export class Conversation {
         this.onSpeak(spokenPermission(msg), 'permission');
         break;
       }
+      case 'attached': // following a session: what arrives next is its history
+        this.attach = { session: msg.session, sdkId: msg.sdkId ?? null, cwd: msg.cwd ?? '' };
+        if (msg.sdkId) this.sessionId = msg.sdkId;
+        this.blocks = [];
+        this.pending = null;
+        this.openText.clear();
+        this.turnText = '';
+        this.turnSpoken = null;
+        this.last = null;
+        this.turnStarted = null;
+        this.turnEnded = null;
+        this.state = msg.state === 'working' || msg.state === 'waiting' ? msg.state : 'idle';
+        this.status = '';
+        break;
+      case 'history': this.loadHistory(msg.messages ?? []); break;
+      case 'session_state': // the session changed state, perhaps because of another viewer
+        if (this.attach && msg.session === this.attach.session && this.state !== 'offline' && this.state !== 'connecting') {
+          if (msg.state === 'idle' || msg.state === 'working') { if (!this.pending) this.state = msg.state; } else if (msg.state === 'waiting' && this.pending) this.state = 'waiting';
+        }
+        break;
+      case 'user_prompt': // typed in another viewer of this session
+        this.blocks.push({ kind: 'user', text: msg.text, at: msg.at ?? null });
+        this.turnStarted = msg.at ?? this.now();
+        this.turnEnded = null;
+        this.turnText = '';
+        this.turnSpoken = null;
+        this.state = 'working';
+        break;
+      case 'sessions': this.sessions = Array.isArray(msg.list) ? msg.list : []; break;
       case 'permission_cancelled':
         for (const b of this.blocks) if (b.kind === 'permission' && b.id === msg.id) b.status = 'cancelled';
         if (this.pending?.id === msg.id) { this.pending = null; this.state = 'working'; }
@@ -206,7 +237,38 @@ export class Conversation {
     }
   }
 
-  handleAssistant(message) {
+  // What happened so far in a session, oldest first, as the service sends it: our
+  // own prompts ({type:'user_prompt'}) and SDK messages ({type:'sdk'}), live or from
+  // the transcript. Entries carry `at` (ms) when the service watched them happen;
+  // transcript ones have none, so those tool calls show no duration. Nothing here is spoken.
+  loadHistory(entries) {
+    this.blocks = [];
+    this.pending = null;
+    this.openText.clear();
+    this.turnText = '';
+    this.turnSpoken = null;
+    for (const e of entries) {
+      if (e.type === 'user_prompt') { this.blocks.push({ kind: 'user', text: e.text, at: e.at ?? null }); this.turnStarted = e.at ?? null; this.turnEnded = null; continue; }
+      if (e.type !== 'sdk' || !e.message || e.message.parent_tool_use_id) continue;
+      const m = e.message;
+      if (m.type === 'system' && m.subtype === 'init') { this.sessionId = m.session_id ?? this.sessionId; this.model = m.model ?? this.model; this.cwd = m.cwd ?? this.cwd; }
+      else if (m.type === 'assistant') this.handleAssistant(m.message, e.at ?? null);
+      else if (m.type === 'user') {
+        const content = m.message?.content;
+        if (typeof content === 'string') { if (content.trim()) this.blocks.push({ kind: 'user', text: content, at: e.at ?? null }); } // a prompt, from a transcript
+        else this.handleUser(m.message, e.at ?? null);
+      } else if (m.type === 'result') {
+        this.last = { ms: m.duration_ms ?? null, cost: m.total_cost_usd ?? null };
+        this.turnEnded = e.at ?? null;
+        if (m.is_error || (m.subtype && m.subtype !== 'success')) this.notice(`Stopped: ${m.subtype ?? 'error'}`, 'error');
+      }
+    }
+    // Replay is for reading: any tool still marked running whose turn is over would spin forever.
+    if (this.state === 'idle') for (const b of this.blocks) if (b.kind === 'tool' && b.status === 'running') b.status = 'ok';
+    this.changed();
+  }
+
+  handleAssistant(message, at = this.now()) {
     for (const c of message?.content ?? []) {
       if (c.type === 'text' && c.text?.trim()) {
         // The complete text is authoritative; reuse the block we streamed into, if any.
@@ -215,22 +277,22 @@ export class Conversation {
         this.turnSpoken = spoken;
         const b = [...this.blocks].reverse().find((x) => x.kind === 'assistant' && x.msgId === message.id && !x.final);
         if (b && !text) this.blocks.splice(this.blocks.indexOf(b), 1); // the reply was only the spoken tag
-        else if (b) { b.raw = c.text; b.text = text; b.final = true; } else if (text) this.blocks.push({ kind: 'assistant', raw: c.text, text, streaming: false, msgId: message.id, final: true });
+        else if (b) { b.raw = c.text; b.text = text; b.final = true; b.justFinished = true; } else if (text) this.blocks.push({ kind: 'assistant', raw: c.text, text, streaming: false, msgId: message.id, final: true });
       } else if (c.type === 'tool_use') {
         if (!this.blocks.some((x) => x.kind === 'tool' && x.id === c.id)) {
-          this.blocks.push({ kind: 'tool', id: c.id, name: c.name, input: c.input, summary: summarizeTool(c.name, c.input), status: 'running', detail: '', started: this.now(), ended: null });
+          this.blocks.push({ kind: 'tool', id: c.id, name: c.name, input: c.input, summary: summarizeTool(c.name, c.input), status: 'running', detail: '', started: at, ended: null });
         }
       }
       // thinking blocks are not shown
     }
   }
 
-  handleUser(message) {
+  handleUser(message, at = this.now()) {
     if (!Array.isArray(message?.content)) return;
     for (const c of message.content) {
       if (c.type !== 'tool_result') continue;
       const b = this.blocks.find((x) => x.kind === 'tool' && x.id === c.tool_use_id);
-      if (b) { b.status = c.is_error ? 'error' : 'ok'; b.detail = toolResultText(c.content).slice(0, 2000); b.ended = this.now(); }
+      if (b) { b.status = c.is_error ? 'error' : 'ok'; b.detail = toolResultText(c.content).slice(0, 2000); b.ended = at; }
     }
   }
 }
