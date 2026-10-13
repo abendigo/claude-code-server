@@ -5,25 +5,17 @@
 // session for good, and asks for a second tap within a few seconds.
 // Scrolls like the other windows (onScroll(amount); positive is up).
 import { Panel, roundRect } from './panel.js';
+import { age, visibleSessions, describeSession } from './session-list.js';
 
 const SANS = 'ui-sans-serif, system-ui, sans-serif';
 const PAD = 28;
 const HEAD_H = 110;
 const ROW_H = 104;
 const DOT = { idle: '#98c379', working: '#7fb6ff', waiting: '#ffcc66', dormant: '#6f8095', closed: '#ff8a8a' };
-const STATE_TEXT = { idle: 'ready', working: 'working', waiting: 'needs your answer', dormant: 'asleep', closed: 'ended' };
 const REFRESH_MS = 5000;
 const CONFIRM_MS = 3000;
 
-export function age(ms, now) {
-  const s = Math.max(0, Math.floor((now - ms) / 1000));
-  if (s < 60) return 'just now';
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 48) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
+export { age };
 
 export class SessionsPanel extends Panel {
   // client: {listSessions(), switchTo(row), newSession(), closeSession(id), open}
@@ -42,13 +34,7 @@ export class SessionsPanel extends Panel {
     this.seen = null;
   }
 
-  // The rows to show: this conversation's folder only (terminal sessions from elsewhere stay out).
-  rows() {
-    const c = this.getConversation();
-    if (!c) return [];
-    const here = c.attach?.cwd;
-    return c.sessions.filter((r) => !here || !r.cwd || r.cwd === here);
-  }
+  rows() { return visibleSessions(this.getConversation()); }
 
   onScroll(amount) {
     this.offset = Math.max(0, this.offset - amount * 40);
@@ -164,14 +150,14 @@ export class SessionsPanel extends Panel {
   }
 
   row(ctx, r, y, w, c, now) {
-    const current = Boolean(r.session) && r.session === c.attach?.session;
+    const d = describeSession(r, c, now);
+    const current = d.current;
     const rowSpot = this.spot(10, y + 4, w - 20, ROW_H - 8, () => { if (!current) { this.client.switchTo(r); this.after(); } });
     ctx.fillStyle = current ? '#1f3a5f' : this.hoverSpot === rowSpot ? '#1a2431' : '#131a24';
     roundRect(ctx, rowSpot.x, rowSpot.y, rowSpot.w, rowSpot.h, 16);
     ctx.fill();
 
-    const state = r.state ?? 'dormant';
-    ctx.fillStyle = DOT[state] ?? DOT.dormant;
+    ctx.fillStyle = DOT[d.state] ?? DOT.dormant;
     ctx.beginPath();
     ctx.arc(PAD + 14, y + ROW_H / 2, 12, 0, Math.PI * 2);
     ctx.fill();
@@ -182,10 +168,10 @@ export class SessionsPanel extends Panel {
     ctx.textAlign = 'left';
     ctx.fillStyle = '#e6edf5';
     ctx.font = `600 29px ${SANS}`;
-    ctx.fillText(this.fit(ctx, (r.summary || '(nothing asked yet)').replace(/\s+/g, ' '), w - PAD * 2 - 44 - crossW), PAD + 44, y + ROW_H / 2 - 17);
+    ctx.fillText(this.fit(ctx, d.label, w - PAD * 2 - 44 - crossW), PAD + 44, y + ROW_H / 2 - 17);
     ctx.fillStyle = '#8b9bb0';
     ctx.font = `24px ${SANS}`;
-    ctx.fillText(`${STATE_TEXT[state] ?? state}${r.lastModified ? ` · ${age(r.lastModified, now)}` : ''}${current ? ' · this one' : ''}${r.viewers > 1 ? ` · ${r.viewers} watching` : ''}`, PAD + 44, y + ROW_H / 2 + 20);
+    ctx.fillText(d.detail, PAD + 44, y + ROW_H / 2 + 20);
 
     if (canClose) {
       const armed = this.armed?.id === r.session;

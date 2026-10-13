@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Claude</title>
+<!-- All URLs are relative: the hub is mounted at /vr/ today and may move to a
+     subdomain later without any change here. -->
+<style>
+  :root { color-scheme: dark; --bg: #0b0f14; --panel: #111823; --line: #1f2a38; --text: #dbe5f0; --dim: #8b9bb0;
+    --blue: #4da3ff; --green: #98c379; --amber: #ffcc66; --red: #ff8a8a; --user: #16314d; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; }
+  button { font: inherit; color: inherit; background: #1b2635; border: 1px solid #2d3f57; border-radius: 8px; padding: 6px 12px; cursor: pointer; }
+  button:hover:not(:disabled) { background: #26364b; }
+  button:disabled { opacity: .45; cursor: default; }
+  h2 { font-size: 15px; margin: 0; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+  .empty { color: var(--dim); padding: 16px; }
+  #app { display: grid; height: 100%; grid-template: "top top top" auto "sessions chat side" 1fr / 270px minmax(0, 1fr) 340px; }
+  #top { grid-area: top; display: flex; gap: 12px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  #top h1 { font-size: 17px; margin: 0; }
+  #top .grow { flex: 1; }
+  #top a { color: var(--dim); font-size: 14px; }
+  .state { font-size: 14px; padding: 2px 10px; border-radius: 99px; background: #1b2635; }
+  .state.working { color: var(--blue); } .state.idle { color: var(--green); } .state.waiting { color: var(--amber); }
+  .state.offline, .state.connecting { color: var(--red); }
+  #tabs { display: none; }
+  .pane { overflow: auto; background: var(--panel); min-height: 0; }
+  #sessions { grid-area: sessions; border-right: 1px solid var(--line); }
+  #side { grid-area: side; border-left: 1px solid var(--line); display: flex; flex-direction: column; }
+  #chat { grid-area: chat; display: flex; flex-direction: column; background: var(--bg); overflow: hidden; }
+  .pane-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; position: sticky; top: 0; background: var(--panel); }
+  /* sessions */
+  ul.sessions { list-style: none; margin: 0; padding: 0 8px 8px; }
+  .sessions .row { display: flex; gap: 4px; margin-bottom: 4px; }
+  .sessions .pick { flex: 1; display: flex; gap: 10px; align-items: center; text-align: left; padding: 8px 10px; min-width: 0; background: #131c28; }
+  .sessions .current .pick { background: #1f3a5f; border-color: #3b6ea8; }
+  .sessions .text { display: flex; flex-direction: column; min-width: 0; }
+  .sessions .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .sessions .detail { font-size: 12.5px; color: var(--dim); }
+  .sessions .end { width: 42px; padding: 0; } .sessions .end.armed { background: #8a2f2f; width: 58px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; background: #6f8095; flex: none; }
+  .dot.idle { background: var(--green); } .dot.working { background: var(--blue); } .dot.waiting { background: var(--amber); } .dot.closed { background: var(--red); }
+  /* conversation */
+  #log { flex: 1; overflow: auto; padding: 16px clamp(12px, 4vw, 48px); scroll-behavior: auto; }
+  .msg { margin: 0 0 16px; max-width: 78ch; }
+  .msg .who { font-size: 12.5px; color: var(--blue); font-weight: 600; margin-bottom: 2px; }
+  .msg.user .body { background: var(--user); padding: 8px 12px; border-radius: 10px; white-space: pre-wrap; }
+  .md p, .md ul, .md ol, .md pre, .md blockquote, .md table { margin: 0 0 .6em; }
+  .md h2, .md h3, .md h4 { margin: .8em 0 .3em; font-size: 1.1em; text-transform: none; letter-spacing: 0; color: #fff; }
+  .md code { font: 14px ui-monospace, "DejaVu Sans Mono", Menlo, monospace; background: #0d131a; padding: 1px 4px; border-radius: 4px; }
+  .md pre { background: #0d131a; padding: 10px 12px; border-radius: 8px; overflow: auto; } .md pre code { padding: 0; background: none; }
+  .md blockquote { border-left: 3px solid var(--blue); padding-left: 12px; color: var(--dim); }
+  .md table { border-collapse: collapse; } .md th, .md td { border: 1px solid var(--line); padding: 4px 10px; text-align: left; }
+  .md li.depth1 { margin-left: 1.2em; } .md li.depth2, .md li.depth3 { margin-left: 2.4em; }
+  .streaming > :last-child::after { content: "▍"; color: var(--blue); }
+  .tool, .perm { font: 13.5px ui-monospace, Menlo, monospace; color: var(--dim); margin: 0 0 8px 14px; }
+  .tool.ok { color: var(--green); } .tool.error { color: var(--red); } .perm.pending { color: var(--amber); } .perm.denied { color: var(--red); }
+  .notice { color: var(--dim); margin: 0 0 12px; } .notice.error { color: var(--red); }
+  #approval { padding: 10px clamp(12px, 4vw, 48px); background: #2a2210; border-top: 1px solid #5c4a14; }
+  #approval .ask { margin-bottom: 8px; word-break: break-word; }
+  #approval .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  #approval .allow { background: #1f5d37; } #approval .always { background: #244a73; } #approval .deny { background: #6b2b2b; }
+  #composer { display: flex; gap: 8px; align-items: flex-end; padding: 10px clamp(12px, 4vw, 48px) calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--panel); }
+  #input { flex: 1; resize: none; font: inherit; color: inherit; background: var(--bg); border: 1px solid #2d3f57; border-radius: 10px; padding: 8px 12px; min-height: 40px; max-height: 200px; }
+  #mic.on { background: #8a2f2f; }
+  #send { background: #244a73; }
+  /* activity and documents */
+  #activity { padding-bottom: 8px; }
+  .status { padding: 12px 14px; border-bottom: 1px solid var(--line); display: grid; grid-template-columns: auto 1fr auto; gap: 2px 10px; align-items: center; position: sticky; top: 0; background: var(--panel); }
+  .status .detail { grid-column: 1 / -1; color: var(--dim); font: 13.5px ui-monospace, Menlo, monospace; word-break: break-word; }
+  .status .timer { font: 600 15px ui-monospace, Menlo, monospace; }
+  .spinner { width: 16px; height: 16px; border-radius: 50%; border: 3px solid currentColor; }
+  .status.working { color: var(--blue); } .status.working .spinner { border-right-color: transparent; animation: spin .8s linear infinite; }
+  .status.waiting { color: var(--amber); } .status.idle { color: var(--green); } .status.offline, .status.connecting { color: var(--red); }
+  .status strong, .status .timer { color: inherit; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .status.working .spinner { animation: none; } }
+  ol.rows { list-style: none; margin: 0; padding: 6px 10px; font: 13.5px ui-monospace, Menlo, monospace; }
+  ol.rows li { display: flex; gap: 8px; padding: 2px 0; align-items: baseline; }
+  ol.rows .turn { color: #9ec9ff; background: var(--user); padding: 3px 8px; border-radius: 6px; margin: 6px 0; display: block; }
+  ol.rows .mark { width: 9px; height: 9px; border-radius: 50%; background: var(--amber); flex: none; }
+  ol.rows .ok .mark { background: var(--green); } ol.rows .error .mark { background: var(--red); }
+  ol.rows .what { flex: 1; word-break: break-word; } ol.rows .time { color: var(--dim); }
+  ol.rows .wait { color: var(--amber); } ol.rows .error { color: var(--red); }
+  #docs { border-top: 1px solid var(--line); flex: 1; overflow: auto; }
+  #docs .tabs { display: flex; gap: 4px; padding: 8px; flex-wrap: wrap; position: sticky; top: 0; background: var(--panel); }
+  #docs .tabs .on { background: #244a73; }
+  #docs .doc { padding: 4px 14px 14px; }
+  /* narrower screens: one pane at a time */
+  @media (max-width: 1100px) {
+    #app { grid-template: "top" auto "tabs" auto "main" 1fr / 1fr; }
+    #tabs { grid-area: tabs; display: flex; border-bottom: 1px solid var(--line); background: var(--panel); }
+    #tabs button { flex: 1; border: 0; border-radius: 0; background: none; padding: 10px 4px; }
+    #tabs button.on { border-bottom: 2px solid var(--blue); color: #fff; }
+    #sessions, #chat, #side { grid-area: main; border: 0; }
+    body:not([data-pane="sessions"]) #sessions, body:not([data-pane="chat"]) #chat, body:not([data-pane="side"]) #side { display: none; }
+  }
+</style>
+</head>
+<body data-pane="chat">
+<div id="app">
+  <header id="top">
+    <h1>Claude</h1>
+    <span id="state" class="state" role="status" aria-live="polite">connecting</span>
+    <span class="grow"></span>
+    <button id="sign-in" title="Sign in to Claude again">Sign in</button>
+    <a href="index.html">VR view</a>
+  </header>
+  <nav id="tabs" aria-label="Panes">
+    <button data-pane="chat">Chat</button>
+    <button data-pane="sessions">Sessions</button>
+    <button data-pane="side">Activity</button>
+  </nav>
+  <aside id="sessions" class="pane" aria-label="Sessions"></aside>
+  <main id="chat">
+    <div id="log" role="log" aria-live="polite"></div>
+    <div id="approval" hidden></div>
+    <form id="composer">
+      <textarea id="input" rows="1" placeholder="Message Claude (Enter sends, Shift+Enter for a new line)" autocomplete="off"></textarea>
+      <button type="button" id="mic" title="Speak (needs the speech service)" hidden>Mic</button>
+      <button type="button" id="stop" hidden>Stop</button>
+      <button type="submit" id="send">Send</button>
+    </form>
+  </main>
+  <aside id="side" class="pane" aria-label="Activity and documents">
+    <section id="activity"></section>
+    <section id="docs" hidden></section>
+  </aside>
+</div>
+<script type="module" src="./js/app/app.js"></script>
+</body>
+</html>
