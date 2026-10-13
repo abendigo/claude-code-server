@@ -19,6 +19,11 @@ export function visibleSessions(convo) {
   return convo.sessions.filter((r) => !here || !r.cwd || r.cwd === here);
 }
 
+// The rows "Clear asleep" would close: asleep (not running, nobody watching) and not the one being followed.
+export function asleepRows(convo) {
+  return visibleSessions(convo).filter((r) => (r.state ?? 'dormant') === 'dormant' && !(r.session && r.session === convo.attach?.session));
+}
+
 // One row as text: label, a state word, and the small print under it.
 export function describeSession(row, convo, now) {
   const state = row.state ?? 'dormant';
@@ -28,5 +33,5 @@ export function describeSession(row, convo, now) {
   if (current) bits.push('this one');
   if (row.viewers > 1) bits.push(`${row.viewers} watching`);
   if (row.workers) bits.push(`${row.workers} ${row.workers === 1 ? 'worker' : 'workers'} running`);
-  return { label: (row.summary || '(nothing asked yet)').replace(/\s+/g, ' '), state, current, detail: bits.join(' · '), canEnd: Boolean(row.session) };
+  return { label: (row.summary || '(nothing asked yet)').replace(/\s+/g, ' '), state, current, detail: bits.join(' · '), canEnd: Boolean(row.session || row.sdkId), key: row.session ?? row.sdkId };
 }

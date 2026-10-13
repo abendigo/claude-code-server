@@ -154,3 +154,27 @@ test('switching, closing and listing send the right messages; not connected says
   assert.equal(client.closeSession('x'), false);
   assert.match(convo.blocks.at(-1).text, /Reconnecting/);
 });
+
+test('closing a session: by the service\'s id, or by SDK id for one known only from disk', async () => {
+  const { ws, client } = await make({ svc: 'svc1' });
+  ws().emit(attached());
+  client.closeSession('svc3');
+  assert.deepEqual(ws().sent.at(-1), { type: 'close_session', session: 'svc3' });
+  client.closeSession({ session: 'svc4', sdkId: 'k4' });
+  assert.deepEqual(ws().sent.at(-1), { type: 'close_session', session: 'svc4', sdkId: 'k4' });
+  client.closeSession({ session: null, sdkId: 'k9' });
+  assert.deepEqual(ws().sent.at(-1), { type: 'close_session', sdkId: 'k9' });
+});
+
+test('when the session being followed is closed, the page moves on to the newest, or a new one', async () => {
+  const { ws, client, store } = await make({ svc: 'svc1', sdk: 'sdk1' });
+  ws().emit(attached('svc1', 'sdk1'));
+  ws().emit({ type: 'closed', session: 'someone-else' });
+  assert.equal(client.attached, true, 'another session closing is none of our business');
+  ws().emit({ type: 'closed', session: 'svc1' });
+  assert.equal(client.attached, false);
+  assert.deepEqual(store.v, {}, 'forgotten, so a reload does not try to go back');
+  assert.equal(ws().sent.at(-1).type, 'list_sessions');
+  ws().emit({ type: 'sessions', list: [{ session: 'svc9', sdkId: 'sdk9', cwd: '/workspace', state: 'idle' }] });
+  assert.deepEqual(ws().sent.at(-1), { type: 'attach', session: 'svc9', cwd: '/workspace' });
+});

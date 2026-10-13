@@ -111,11 +111,13 @@ test('sessions: rows for this folder, the current one marked, switch and New', (
   button(el, 'New').click();
   assert.deepEqual(calls, ['switch s2', 'switch k3', 'new']);
   const ends = byClass(el, 'end');
-  assert.equal(ends.length, 2, 'a session the service does not hold has no End button');
+  assert.equal(ends.length, 3, 'every row can be ended, including one known only from its transcript');
   ends[0].click();
   assert.equal(calls.at(-1), 'end s1');
   renderSessions(el, c, NOW, { ...handlers, armed: 's2' });
   assert.equal(byClass(el, 'armed')[0].textContent, 'End?');
+  renderSessions(el, c, NOW, { ...handlers, armed: 'k3' });
+  assert.equal(byClass(el, 'armed').length, 1, 'a transcript-only row is armed by its SDK id');
 });
 
 test('activity: status, timer, rows with marks and durations', () => {
@@ -192,4 +194,20 @@ test('workers: listed under the status with time and what they are doing; Stop t
   assert.equal(byClass(el, 'armed')[0].textContent, 'Stop?');
   renderActivity(el, new Conversation(), NOW, { onStopTask() {} });
   assert.equal(byClass(el, 'workers').length, 0, 'no workers, no section');
+});
+
+test('sessions: Clear asleep appears only when something is asleep, and asks for a second tap', () => {
+  const c = new Conversation();
+  c.attach = { session: 's1', cwd: '/workspace' };
+  const el = box();
+  const cleared = [];
+  c.sessions = [row(), row({ session: 's2', state: 'working' })];
+  renderSessions(el, c, NOW, { onNew() {}, onSwitch() {}, onEnd() {}, onClear: () => cleared.push(1), armed: null, armedClear: false });
+  assert.equal(byClass(el, 'clear').length, 0);
+  c.sessions = [row(), row({ session: null, sdkId: 'k3', state: 'dormant' }), row({ session: null, sdkId: 'k4', state: 'dormant' })];
+  renderSessions(el, c, NOW, { onNew() {}, onSwitch() {}, onEnd() {}, onClear: () => cleared.push(1), armed: null, armedClear: false });
+  button(el, 'Clear asleep').click();
+  assert.equal(cleared.length, 1);
+  renderSessions(el, c, NOW, { onNew() {}, onSwitch() {}, onEnd() {}, onClear() {}, armed: null, armedClear: true });
+  assert.equal(byClass(el, 'clear')[0].textContent, 'Close 2?');
 });
